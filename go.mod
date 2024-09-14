@@ -3,7 +3,9 @@ module github.com/charlienet/go-crypto
 go 1.23
 
 require (
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/charlienet/go-misc v0.0.0-20240911064214-e5f4643869eb
+	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.9.0
 	github.com/tjfoc/gmsm v1.4.1
 )

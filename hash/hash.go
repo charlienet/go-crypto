@@ -5,7 +5,9 @@ import (
 	"hash"
 	"hash/fnv"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/charlienet/go-misc/bytesconv"
+	"github.com/spaolacci/murmur3"
 	"github.com/tjfoc/gmsm/sm3"
 )
 
@@ -81,4 +83,14 @@ func Funv64(msg []byte) uint64 {
 	h := fnv.New64()
 	h.Write(msg)
 	return h.Sum64()
+}
+
+func XXHashUint64(msg []byte) uint64 {
+	h := xxhash.New()
+	_, _ = h.Write(msg)
+	return h.Sum64()
+}
+
+func Murmur3(msg []byte) uint64 {
+	return murmur3.Sum64(msg)
 }
