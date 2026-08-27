@@ -13,7 +13,7 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/charlienet/go-utils/bytesconv"
-	"github.com/charlienet/go-crypto/crypto"
+	"github.com/charlienet/go-crypto"
 	"github.com/emmansun/gmsm/sm3"
 	"github.com/spaolacci/murmur3"
 )
