@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/charlienet/go-utils v0.0.0
+	github.com/charlienet/go-utils v0.1.0
 	github.com/emmansun/gmsm v0.44.1
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.9.0
@@ -17,5 +17,3 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/charlienet/go-utils => ../go-utils
