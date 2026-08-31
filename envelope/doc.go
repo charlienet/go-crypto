@@ -252,4 +252,90 @@
 //		os.Remove("encrypted.bin")
 //		os.Remove("decrypted.bin")
 //	}
+//
+// # hyb1 数字信封（公钥信封，v1.0.0 起）
+//
+// hyb1 是混合加密（KEM + AEAD）信封：给"公钥持有者"加密（大）数据的
+// 一站式 API。Seal 内部自动完成密钥封装（RSA-OAEP 或 X25519 临时-静态
+// ECDH）与随机 DEK 的对称 GCM 载荷加密，输出自描述单条 []byte，杜绝
+// 调用方手拼 RSA-OAEP + AES。
+//
+// # 三种信封格式的关系
+//
+//   - gcx1：共享密钥小报文（对称密钥、直接 GCM、35 字节开销）。
+//   - fsb2：文件流（对称密钥、分块 GCM、流式大文件、头部自描述）。
+//   - hyb1：公钥信封（公钥 → 随机 DEK → 对称 GCM 载荷，单条密封结果）。
+//
+// hyb1 与 fsb1/fsb2 互补不冲突：hyb1 解决"公钥分发数据密钥"，fsb2 解决
+// "大文件流式加密"；两者组合见下文"公钥 + 大文件"。
+//
+// # hyb1 字节布局（冻结格式，多字节字段均为大端序）
+//
+//	offset  size  field
+//	0       4     magic "GCHY"
+//	4       1     version（0x00，首版冻结）
+//	5       1     kemID（0x01=RSA-OAEP(SHA-256)；0x02=X25519 临时-静态 ECDH）
+//	6       1     payloadAlgID（0x01=SM4-GCM(DEK 16B)；0x02=AES-256-GCM(DEK 32B)）
+//	7       2     ephPub 长度（BE16）
+//	9       n     ephPub（X25519=32B；RSA 路径 n=0）
+//	9+n     2     nonce 长度（BE16）
+//	11+n    m     nonce（X25519=12B wrap GCM nonce；RSA 路径 m=0）
+//	11+n+m  2     encDEK 长度（BE16）
+//	13+n+m  k     encDEK（X25519 = ct‖tag；RSA = OAEP 密文）
+//	13+n+m+k  L   payload：nonce(12B) ‖ GCM 密文 ‖ tag(16B)
+//
+// payload GCM 的 AAD = 完整头部（7B）‖ 用户 AAD（头部整体入 AAD，
+// 参照 gcx1 v2 / fsb2 的 header 入 AAD 防篡改做法）。X25519 路径的
+// wrap key = HKDF-SHA256(shared, salt=头部 7B, info="GCHY-hyb1-dek")
+// （32B），以 AES-256-GCM(wrap key, 12B 随机 nonce) 加密 DEK。
+//
+// # 用法示例（公钥加密报文）
+//
+//	package main
+//
+//	import (
+//		"crypto/ecdh"
+//		"crypto/rand"
+//		"fmt"
+//		"log"
+//
+//		"github.com/charlienet/go-crypto/envelope"
+//	)
+//
+//	func main() {
+//		// 收件人公钥（X25519；传 *rsa.PublicKey 亦可走 RSA-OAEP 路径）。
+//		// 演示用临时密钥；生产环境公钥应来自受信通道（证书/密钥服务器）。
+//		priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		pub := priv.PublicKey()
+//
+//		sealed, err := envelope.Seal(pub, []byte("机密数据"), []byte("上下文AAD"))
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		fmt.Printf("信封: %x\n", sealed)
+//
+//		plain, err := envelope.Open(priv, sealed, []byte("上下文AAD"))
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		fmt.Printf("明文: %s\n", plain)
+//	}
+//
+// # "公钥 + 大文件"组合建议
+//
+// hyb1 密封结果为单条内存块，适合中小报文；大文件推荐组合方案：
+//
+//  1. hyb1.Seal 密封随机 DEK（小开销，约数百字节）；
+//  2. 以该 DEK 走 fsb2（NewFileEncrypter / NewFileDecryptingReader）
+//     流式加密文件；
+//  3. 持久化 hyb1 信封 + fsb2 密文文件，解密时 Open 得 DEK 再解 fsb2。
+//
+// 注意：当前版本收件人侧无法直接从 hyb1 信封取出 DEK（Open 只返回明文、
+// 不暴露 DEK），故上述组合要求发送方取得 DEK 后再加密大文件。DEK 外提
+// 接口（如 SealDEK/OpenDEK 拆分：仅封装 DEK 的信封 + 单独载荷解密入口，
+// 使"发送方仅加密小信封、收件人解密大文件"成为可能）预留为未来扩展，
+// 不在此版本实现——届时可演进为"hyb1 仅封 DEK，载荷段交由 fsb2 消费"。
 package envelope

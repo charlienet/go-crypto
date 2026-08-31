@@ -136,3 +136,31 @@ func (kp *KeyPair) MarshalJSON() ([]byte, error) {
 func (kp *KeyPair) UnmarshalJSON(data []byte) error {
 	return errors.New("crypto: KeyPair JSON deserialization is disabled; use keymgr.ParsePrivateKeyPair for explicit decoding")
 }
+
+// ErrKeyPairNotSigner 私钥不实现标准库 crypto.Signer 时返回的哨兵错误。
+// 仅 X25519/\*ecdh（及 nil 私钥）会命中：它们只做密钥协商，无签名能力。
+var ErrKeyPairNotSigner = errors.New(
+	"crypto: private key does not implement crypto.Signer " +
+		"(X25519/ECDH keys are for key agreement only; " +
+		"signable types: *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey, *sm2.PrivateKey)",
+)
+
+// AsSigner 返回标准库 crypto.Signer 视图的私钥，可直接用于
+// tls.Certificate / JWT / 离线签名 / 外部 KMS 等标准生态：
+//
+//	priv, _ := kp.AsSigner()          // crypto.Signer
+//	sig, _ := priv.Sign(rand.Reader, digest[:], crypto.SHA256)
+//
+// 支持的私钥类型：*rsa.PrivateKey、*ecdsa.PrivateKey、ed25519.PrivateKey
+// 与 *sm2.PrivateKey（gmsm 实现 crypto.Signer，Sign 摘要语义见其文档）。
+// X25519/*ecdh 私钥（仅密钥协商）与 nil 私钥返回 ErrKeyPairNotSigner。
+//
+// 注意：本接口与根包 Asymmetric.Signer（Sign(msg) 直接对完整消息签名）
+// 语义不同——crypto.Signer.Sign 接收的是调用方已哈希的摘要（digest），
+// 勿混用。
+func (kp *KeyPair) AsSigner() (crypto.Signer, error) {
+	if s, ok := kp.PrivateKey.(crypto.Signer); ok {
+		return s, nil
+	}
+	return nil, ErrKeyPairNotSigner
+}
