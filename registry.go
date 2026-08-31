@@ -44,9 +44,16 @@ var errNilEngine = errors.New("crypto: nil engine")
 
 // CipherFactory 对称 Cipher 工厂：New 构造算法实例（密钥长度严格校验在
 // 工厂内完成），KeySize/IVSize 为 GenerateKey/BlockSize 消费的元数据。
+//
+// Insecure 标记强度不足/已被破解的遗留算法（DES/3DES）：根包
+// NewCipher/GenerateKey 读取该元数据，未显式 WithInsecureAlgorithms()
+// 放行时拒绝返回 ErrInsecureAlgorithm。注册自定义遗留算法时请如实声明。
+// TODO(扩展点): 未来需要更细粒度安全分级时，可将 Insecure 扩展为策略
+// 位集合（如门限强度等级），本字段为当前最小实现。
 type CipherFactory struct {
 	New             func(key []byte) (Cipher, error)
 	KeySize, IVSize int
+	Insecure        bool
 }
 
 // cipherRegistry 对称 Cipher 工厂注册表（键 = 算法名，如 "AES-128"/"SM4"）。
@@ -82,6 +89,23 @@ func CipherFactoryFor(algorithm string) (CipherFactory, error) {
 		return CipherFactory{}, fmt.Errorf("%w: %q", ErrEngineNotRegistered, algorithm)
 	}
 	return f, nil
+}
+
+// lookupCipherFactory 查询 Cipher 工厂，兼容泛名归一：
+// 先按原名精确查询（兼容自定义算法注册的非规范键），未命中时经
+// NormalizeAlgorithm 归一化再查（"AES" 等泛名 → 规范名 "AES-128"）。
+// 两者均未命中返回 ErrEngineNotRegistered（自定义/未注册名的错误
+// 语义与 CipherFactoryFor 一致，供调方包装 blank import 提示）。
+func lookupCipherFactory(algorithm string) (CipherFactory, error) {
+	if f, err := CipherFactoryFor(algorithm); err == nil {
+		return f, nil
+	}
+	if norm, err := NormalizeAlgorithm(algorithm); err == nil {
+		if f, e := CipherFactoryFor(norm); e == nil {
+			return f, nil
+		}
+	}
+	return CipherFactory{}, fmt.Errorf("%w: %q", ErrEngineNotRegistered, algorithm)
 }
 
 // ---- 对称：模式执行器注册表（键 = Mode 枚举，阶段 4 由 Encrypt/Decrypt 消费）----

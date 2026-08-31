@@ -112,10 +112,12 @@ func newCBC(c crypto.Cipher, cfg *crypto.Config) (crypto.CipherMode, error) {
 
 // ecbExecutor ECB 加密执行器（不安全，仅遗留兼容）。
 // 输出格式：无 IV、无前缀；填充缺省 PKCS7。
+// 构造时透传协议层 AllowInsecure 策略（modeOpts）：协议层 prepare 已
+// 校验闸门（WithInsecureAlgorithms 放行），此处放行低层 NewECB。
 type ecbExecutor struct{}
 
 func (ecbExecutor) Encrypt(c crypto.Cipher, alg crypto.Algorithm, cfg *crypto.Config, plaintext []byte) ([]byte, error) {
-	m, err := c.NewECB(paddingOpts(cfg)...)
+	m, err := c.NewECB(modeOpts(cfg)...)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +129,7 @@ func (ecbExecutor) Encrypt(c crypto.Cipher, alg crypto.Algorithm, cfg *crypto.Co
 }
 
 func (ecbExecutor) Decrypt(c crypto.Cipher, alg crypto.Algorithm, cfg *crypto.Config, ciphertext []byte) ([]byte, error) {
-	m, err := c.NewECB(paddingOpts(cfg)...)
+	m, err := c.NewECB(modeOpts(cfg)...)
 	if err != nil {
 		return nil, err
 	}
@@ -276,4 +278,15 @@ func paddingOpts(cfg *crypto.Config) []crypto.Option {
 		return []crypto.Option{crypto.WithPadding(cfg.Padding)}
 	}
 	return nil
+}
+
+// modeOpts 构造 ECB 等需策略透传模式的低层选项：透传显式填充，并把
+// 协议层已校验的 AllowInsecure 策略透传给低层闸门（协议层放行后，
+// 低层 NewECB 不再二次拒绝；未放行时协议层在 prepare 已拒绝，不会到达）。
+func modeOpts(cfg *crypto.Config) []crypto.Option {
+	opts := paddingOpts(cfg)
+	if cfg.AllowInsecure {
+		opts = append(opts, crypto.WithInsecureAlgorithms())
+	}
+	return opts
 }

@@ -145,15 +145,15 @@ func TestProtocol_CustomExtension(t *testing.T) {
 }
 
 // TestProtocol_Engines Engines() 汇总清单须包含四个子包注册的全部键：
-// 非对称（asym）、密钥协商（agreement）、密钥对生成（keymgr，与 asym 同键去重）
-// 与对称（symmetric，7 算法键 + 6 模式键）。
+	// 非对称（asym）、密钥协商（agreement）、密钥对生成（keymgr，与 asym 同键去重）
+	// 与对称（symmetric，6 算法键 + 6 模式键；泛名 "AES" 已移除，归一落 "AES-128"）。
 func TestProtocol_Engines(t *testing.T) {
 	engines := crypto.Engines()
 	for _, want := range []string{
 		// 非对称/密钥协商/密钥对生成键
 		"RSA", "ECDSA", "ED25519", "SM2", "ECDH", "X25519",
-		// 对称算法键（cipher 注册表）
-		"SM4", "AES", "AES-128", "AES-192", "AES-256", "DES", "3DES",
+		// 对称算法键（cipher 注册表，规范名；无泛名 "AES"）
+		"SM4", "AES-128", "AES-192", "AES-256", "DES", "3DES",
 		// 对称工作模式键（mode 注册表，Mode 枚举 String() 规范名）
 		"GCM", "CBC", "ECB", "CFB", "OFB", "CTR",
 	} {

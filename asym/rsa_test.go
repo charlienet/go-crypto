@@ -145,6 +145,36 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 		"弱密钥错误信息不符合预期: %v", err)
 }
 
+// TestRSAWeakKeyRejected_ObjectPath：对象注入路径同样拒绝 <2048 位弱密钥
+//（与字符串路径策略对称，P1 修复）。
+func TestRSAWeakKeyRejected_ObjectPath(t *testing.T) {
+	weakKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	require.NoError(t, err)
+
+	// 私钥对象注入路径：构造必须失败
+	_, err = rootcrypto.NewAsymmetric(rootcrypto.RSA, rootcrypto.WithPrivateKeyObject(weakKey))
+	assert.Error(t, err, "1024 位弱私钥对象应被拒绝，实际被接受")
+	assert.True(t, strings.Contains(err.Error(), "too weak"),
+		"弱私钥错误信息不符合预期: %v", err)
+	assert.Contains(t, err.Error(), "RSA private key too weak",
+		"错误信息应指明是私钥弱密钥（与字符串路径对齐）")
+
+	// 公钥对象注入路径：构造必须失败
+	_, err = rootcrypto.NewAsymmetric(rootcrypto.RSA, rootcrypto.WithPublicKeyObject(&weakKey.PublicKey))
+	assert.Error(t, err, "1024 位弱公钥对象应被拒绝，实际被接受")
+	assert.True(t, strings.Contains(err.Error(), "too weak"),
+		"弱公钥错误信息不符合预期: %v", err)
+	assert.Contains(t, err.Error(), "RSA public key too weak",
+		"错误信息应指明是公钥弱密钥（与字符串路径对齐）")
+
+	// 合法 2048 位对象注入不受影响（回归）
+	strongKey := getTestRSAPair(t)
+	_, err = rootcrypto.NewAsymmetric(rootcrypto.RSA, rootcrypto.WithPrivateKeyObject(strongKey))
+	assert.NoError(t, err)
+	_, err = rootcrypto.NewAsymmetric(rootcrypto.RSA, rootcrypto.WithPublicKeyObject(&strongKey.PublicKey))
+	assert.NoError(t, err)
+}
+
 // ==================== RSA Name ====================
 
 func TestRSA_Name(t *testing.T) {
@@ -378,4 +408,50 @@ func TestRSA_EncryptAndDecrypt(t *testing.T) {
 	decrypted, err := algo.Decrypt(ciphertext)
 	assert.NoError(t, err)
 	assert.Equal(t, plaintext, []byte(decrypted))
+}
+
+// ==================== RSA 密钥位数配置消费（P3#24） ====================
+
+// TestRSA_KeyBits_3072 WithRSAKeyBits(3072) 消费接线：GenerateKey 产出
+// 3072 位密钥（BitLen==3072），且同实例签验/加解密往返通过。
+func TestRSA_KeyBits_3072(t *testing.T) {
+	s, err := rootcrypto.NewAsymmetric(rootcrypto.RSA, rootcrypto.WithRSAKeyBits(3072))
+	require.NoError(t, err)
+
+	kp, err := s.GenerateKey()
+	require.NoError(t, err)
+	rsaPrk, ok := kp.PrivateKey.(*rsa.PrivateKey)
+	require.True(t, ok)
+	assert.Equal(t, 3072, rsaPrk.N.BitLen(), "GenerateKey 应使用配置的 3072 位密钥")
+
+	msg := []byte("3072-bit rsa roundtrip")
+	sig, err := s.Sign(msg)
+	require.NoError(t, err)
+	assert.True(t, s.Verify(msg, sig), "3072 位密钥同实例签验应通过")
+
+	ct, err := s.Encrypt([]byte("ct"))
+	require.NoError(t, err)
+	pt, err := s.Decrypt(ct)
+	require.NoError(t, err)
+	assert.Equal(t, "ct", string(pt), "3072 位密钥同实例加解密应往返")
+}
+
+// ==================== RSA 私钥字符串注入公钥回填（P3#20） ====================
+
+// TestRSA_WithPrivateKeyString_BackfillsPublicKey 仅 WithPrivateKey(string)
+// 注入私钥后，同实例可直接 Sign→Verify（公钥能力自动派生）。
+func TestRSA_WithPrivateKeyString_BackfillsPublicKey(t *testing.T) {
+	prv := getTestRSAPair(t)
+
+	prkBytes, err := x509.MarshalPKCS8PrivateKey(prv)
+	require.NoError(t, err)
+
+	s, err := rootcrypto.NewAsymmetric(rootcrypto.RSA,
+		rootcrypto.WithPrivateKey(base64.StdEncoding.EncodeToString(prkBytes)))
+	require.NoError(t, err)
+
+	msg := []byte("string private key backfills public key")
+	sig, err := s.Sign(msg)
+	require.NoError(t, err)
+	assert.True(t, s.Verify(msg, sig), "WithPrivateKey(string) 后同实例验签应通过（公钥自动派生）")
 }

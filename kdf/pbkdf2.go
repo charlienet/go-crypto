@@ -14,7 +14,8 @@ import (
 // 参数：
 //   - password：用户密码
 //   - salt：盐值（建议至少 16 字节随机值，每次派生唯一）
-//   - iterations：迭代次数（建议 ≥ 100000，根据硬件性能调整）
+//   - iterations：迭代次数（建议 ≥ 600000，参考 OWASP 2024 建议；
+//     与 keymgr PBES2（pbes2PBKDF2Iterations=600_000）同款口径，根据硬件性能调整）
 //   - keyLen：输出密钥长度（字节）
 //
 // 返回：
@@ -32,7 +33,7 @@ import (
 //
 // 示例：
 //
-//	key, _ := kdf.PBKDF2([]byte("password"), salt, 100000, 16)
+//	key, _ := kdf.PBKDF2([]byte("password"), salt, 600000, 16)
 //	// key: 16 字节 AES-128 密钥
 func PBKDF2(password, salt []byte, iterations, keyLen int) ([]byte, error) {
 	if iterations <= 0 {
@@ -54,7 +55,7 @@ func PBKDF2(password, salt []byte, iterations, keyLen int) ([]byte, error) {
 //
 // 示例：
 //
-//	key, _ := kdf.PBKDF2WithHash("SHA-512", []byte("password"), salt, 100000, 32)
+//	key, _ := kdf.PBKDF2WithHash("SHA-512", []byte("password"), salt, 600000, 32)
 func PBKDF2WithHash(hashAlg string, password, salt []byte, iterations, keyLen int) ([]byte, error) {
 	if iterations <= 0 {
 		return nil, errors.New("kdf: iterations must be positive")

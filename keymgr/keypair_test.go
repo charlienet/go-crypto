@@ -3,6 +3,7 @@ package keymgr
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/pbkdf2"
@@ -448,6 +449,37 @@ func TestKeyPair_LoadWeakRSA_Rejected(t *testing.T) {
 	assert.NotNil(t, kp2.PrivateKey)
 }
 
+// --- 加密密码语义（P1：显式空密码必须报错） ---
+
+func TestKeyPair_MarshalPrivateKey_EmptyEncryptionPassword(t *testing.T) {
+	kp, err := GenerateKeyPair(rootcrypto.RSA)
+	require.NoError(t, err)
+
+	// 用例 1：显式空密码（WithEncryptionPassword([]byte{})）→ 明确报错，
+	// 禁止以 "无加密" 静默降级（否则调用方误以为私钥已受保护）。
+	_, err = MarshalPrivateKey(kp.PrivateKey, KeyFormatPEM, WithEncryptionPassword([]byte{}))
+	assert.Error(t, err, "显式空密码应报错")
+	assert.Contains(t, err.Error(), "empty encryption password")
+
+	// 用例 2：未传加密选项 → 明文输出（行为不变）
+	plain, err := MarshalPrivateKey(kp.PrivateKey, KeyFormatPEM)
+	require.NoError(t, err)
+	assert.Contains(t, string(plain), "PRIVATE KEY")
+	assert.NotContains(t, string(plain), "ENCRYPTED PRIVATE KEY")
+
+	// 用例 3：正常密码 → PEM 加密输出（行为不变）
+	enc, err := MarshalPrivateKey(kp.PrivateKey, KeyFormatPEM, WithEncryptionPassword([]byte("correct horse battery staple")))
+	require.NoError(t, err)
+	assert.Contains(t, string(enc), "ENCRYPTED PRIVATE KEY")
+
+	// 加载侧对称：不带/带错误密码的解析互斥
+	loaded, err := ParsePrivateKeyPair(enc, KeyFormatPEM, WithPassword([]byte("correct horse battery staple")))
+	require.NoError(t, err)
+	assert.NotNil(t, loaded.PrivateKey)
+	_, err = ParsePrivateKeyPair(enc, KeyFormatPEM, WithPassword([]byte("wrong")))
+	assert.Error(t, err)
+}
+
 // --- PEM 私钥加密（PBES2）测试（P2） ---
 
 func TestKeyPair_SaveLoadPrivateKey_Encrypted(t *testing.T) {
@@ -668,4 +700,91 @@ func TestDecryptPBES2_SHA1PRF(t *testing.T) {
 	derUnknown := buildPBES2SampleDER(t, sha256.New, asn1.ObjectIdentifier{1, 2, 3, 4}, "pw", plainDER, salt, iv, 1000, 32)
 	_, err = decryptPBES2PrivateKey(derUnknown, []byte("pw"))
 	assert.Error(t, err)
+}
+
+// --- #27e PBES2 解密侧 KeyLength 必须恰为 32 ---
+
+// TestDecryptPBES2_KeyLengthMismatch 构造 KeyLength=16 + AES-256-CBC OID 的
+// 恶意 DER：显式 KeyLength 与加密方案密钥长度不符，解密路径必须拒绝
+//（防弱化降级，省略 KeyLength 时默认 32 不受影响）。
+func TestDecryptPBES2_KeyLengthMismatch(t *testing.T) {
+	salt := []byte("0123456789abcdef")
+	iv := make([]byte, 16)
+	for i := range iv {
+		iv[i] = byte(i)
+	}
+
+	// KeyLength=16 恶意 DER：构建密文用 16 字节派生密钥（AES 接受 16B），
+	// 但解密侧必须在派生前拒绝（AES-256-CBC 要求显式 KeyLength==32）
+	der := buildPBES2SampleDER(t, sha256.New, oidHMACWithSHA256, "pw", []byte("dummy"), salt, iv, 1000, 16)
+	_, err := decryptPBES2PrivateKey(der, []byte("pw"))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "key length", "错误应指向 KeyLength 语义")
+
+	// 省略 KeyLength（0）：默认 32，正常解密（后续以错误密码触发填充错误，
+	// 证明 keyLength 检查未误伤合法输入）
+	derDefault := buildPBES2SampleDER(t, sha256.New, oidHMACWithSHA256, "pw", []byte("dummy"), salt, iv, 1000, 0)
+	_, err = decryptPBES2PrivateKey(derDefault, []byte("wrong-password"))
+	assert.Error(t, err)
+	assert.NotContains(t, err.Error(), "key length")
+}
+
+// --- #27d ParseKeyPair 回退路径保留私钥侧真实原因 ---
+
+// TestParseKeyPair_JoinErrorIncludesPrivateReason 加密 PEM 密码错误时，
+// 回退到公钥解析也失败，errors.Join 合并的错误必须含私钥侧真实原因。
+func TestParseKeyPair_JoinErrorIncludesPrivateReason(t *testing.T) {
+	kp, err := GenerateKeyPair(rootcrypto.RSA)
+	require.NoError(t, err)
+	enc, err := MarshalPrivateKey(kp.PrivateKey, KeyFormatPEM, WithEncryptionPassword([]byte("secret")))
+	require.NoError(t, err)
+
+	// 错误密码：私钥侧原因（failed to decrypt PEM）必须保留在返回错误中
+	_, err = ParseKeyPair(enc, KeyFormatPEM, WithPassword([]byte("wrong")))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decrypt PEM", "私钥侧真实原因被回退路径吞掉")
+
+	// 正确密码不受影响：私钥解析成功即返回
+	parsed, err := ParseKeyPair(enc, KeyFormatPEM, WithPassword([]byte("secret")))
+	require.NoError(t, err)
+	assert.NotNil(t, parsed.PrivateKey)
+}
+
+// --- #18 keymgr 对 ecdh 密钥类型的编解码与算法探测 ---
+
+// TestKeyPair_ECDHKeycodec ECDH（NIST P-256 与 X25519）私钥 PKCS#8 往返：
+// 回读类型遵循标准库行为（NIST→*ecdsa.PrivateKey，X25519→*ecdh.PrivateKey），
+// detectAlgorithm 区分曲线。
+func TestKeyPair_ECDHKeycodec(t *testing.T) {
+	// NIST P-256：PKCS#8 回读为 *ecdsa.PrivateKey（174 #18 双类型的依据）
+	priv, err := ecdh.P256().GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	assert.Equal(t, "ECDH", detectAlgorithm(priv))
+	assert.Equal(t, "ECDH", detectAlgorithm(priv.PublicKey()))
+
+	der, err := MarshalPrivateKey(priv, KeyFormatRaw)
+	require.NoError(t, err)
+	parsed, err := ParsePrivateKeyPair(der, KeyFormatRaw)
+	require.NoError(t, err)
+	assert.IsType(t, &ecdsa.PrivateKey{}, parsed.PrivateKey)
+	assert.NotNil(t, parsed.PublicKey)
+	// 私钥回读类型虽是 ECDSA，公钥提取仍可用且可经 SPKI 编解码
+	pubDER, err := MarshalPublicKey(parsed.PublicKey, KeyFormatRaw)
+	require.NoError(t, err)
+	pubParsed, err := ParsePublicKeyPair(pubDER, KeyFormatRaw)
+	require.NoError(t, err)
+	assert.NotNil(t, pubParsed.PublicKey)
+
+	// X25519：回读为 *ecdh.PrivateKey，算法探测报 "X25519"
+	xPriv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	assert.Equal(t, "X25519", detectAlgorithm(xPriv))
+	assert.Equal(t, "X25519", detectAlgorithm(xPriv.PublicKey()))
+
+	xDer, err := MarshalPrivateKey(xPriv, KeyFormatRaw)
+	require.NoError(t, err)
+	xParsed, err := ParsePrivateKeyPair(xDer, KeyFormatRaw)
+	require.NoError(t, err)
+	assert.IsType(t, &ecdh.PrivateKey{}, xParsed.PrivateKey)
+	assert.Equal(t, "X25519", detectAlgorithm(xParsed.PrivateKey))
 }

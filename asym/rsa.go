@@ -20,6 +20,20 @@ type rsa_algo struct {
 	bits int
 }
 
+// asymHash 将 AsymConfig.Hash 归一为签名摘要算法（RSA/ECDSA 共用）：
+// 0 → 默认 SHA256；白名单 SHA256/SHA384/SHA512 原样返回。
+// 白名单外值返回错误（防御性兜底：正常经根包 WithAsymHash 已被拒绝）。
+func asymHash(h crypto.Hash) (crypto.Hash, error) {
+	if h == 0 {
+		return crypto.SHA256, nil
+	}
+	switch h {
+	case crypto.SHA256, crypto.SHA384, crypto.SHA512:
+		return h, nil
+	}
+	return 0, fmt.Errorf("unsupported asymmetric hash %v (whitelist: SHA256/SHA384/SHA512)", h)
+}
+
 // newRSA 构造 RSA 非对称算法实例（注册表工厂签名）。
 func newRSA(opts ...rootcrypto.AsymOption) (rootcrypto.Asymmetric, error) {
 	cfg := &rootcrypto.AsymConfig{}
@@ -29,10 +43,18 @@ func newRSA(opts ...rootcrypto.AsymOption) (rootcrypto.Asymmetric, error) {
 		}
 	}
 
-	algo := &rsa_algo{
-		hash: crypto.SHA256,
-		bits: 2048,
+	algo := &rsa_algo{}
+
+	// 消费 cfg.RSAKeyBits（0 → 默认 2048）与 cfg.Hash（0 → 默认 SHA256）。
+	algo.bits = cfg.RSAKeyBits
+	if algo.bits == 0 {
+		algo.bits = 2048
 	}
+	hash, err := asymHash(cfg.Hash)
+	if err != nil {
+		return nil, err
+	}
+	algo.hash = hash
 
 	// 优先使用密钥对象
 	if cfg.PrivateKeyObject != nil {
@@ -40,7 +62,15 @@ func newRSA(opts ...rootcrypto.AsymOption) (rootcrypto.Asymmetric, error) {
 		if !ok {
 			return nil, errors.New("not an RSA private key")
 		}
+		// 弱密钥校验：与字符串路径（WithPrivateKey）策略对称，
+		// 对象注入路径同样拒绝低于 2048-bit 的 RSA 私钥
+		if rsaKey.N.BitLen() < 2048 {
+			bits := rsaKey.N.BitLen()
+			return nil, fmt.Errorf("RSA private key too weak: %d bits, minimum required is 2048 bits", bits)
+		}
 		algo.prk = rsaKey
+		// 回填公钥：私钥注入后同实例可直接 Verify/Encrypt（公钥能力自动派生）。
+		algo.puk = &rsaKey.PublicKey
 	} else if cfg.PrivateKey != "" {
 		if err := algo.WithPrivateKey(cfg.PrivateKey); err != nil {
 			return nil, err
@@ -51,6 +81,12 @@ func newRSA(opts ...rootcrypto.AsymOption) (rootcrypto.Asymmetric, error) {
 		rsaKey, ok := cfg.PublicKeyObject.(*rsa.PublicKey)
 		if !ok {
 			return nil, errors.New("not an RSA public key")
+		}
+		// 弱密钥校验：与字符串路径（WithPublicKey）策略对称，
+		// 对象注入路径同样拒绝低于 2048-bit 的 RSA 公钥
+		if rsaKey.N.BitLen() < 2048 {
+			bits := rsaKey.N.BitLen()
+			return nil, fmt.Errorf("RSA public key too weak: %d bits, minimum required is 2048 bits", bits)
 		}
 		algo.puk = rsaKey
 	} else if cfg.PublicKey != "" {
@@ -73,6 +109,8 @@ func (s *rsa_algo) GenerateKey() (rootcrypto.KeyPair, error) {
 	}
 
 	s.prk = key
+	// 回填公钥：GenerateKey 后同实例可直接 Verify/Encrypt（公钥能力自动派生）。
+	s.puk = &key.PublicKey
 
 	return rootcrypto.KeyPair{
 		PrivateKey: key,
@@ -111,6 +149,8 @@ func (s *rsa_algo) WithPrivateKey(privateKey string) error {
 		s.prk = nil
 		return fmt.Errorf("RSA private key too weak: %d bits, minimum required is 2048 bits", bits)
 	}
+	// 回填公钥：私钥注入后同实例可直接 Verify/Encrypt（公钥能力自动派生）。
+	s.puk = &s.prk.PublicKey
 	return nil
 }
 

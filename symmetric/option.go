@@ -52,4 +52,10 @@ var (
 	EmbedIV = crypto.EmbedIV
 	// EmbedNonce 启用 nonce 前置（GCM）。
 	EmbedNonce = crypto.EmbedNonce
+	// WithInsecureAlgorithms 允许使用不安全算法（DES/3DES）和模式（ECB）。
+	// 同时作用于低层与协议层：
+	//   - 低层 NewCipher/GenerateKey：默认拒绝（ErrInsecureAlgorithm）后放行；
+	//   - 协议层 Encrypt/Decrypt（prepare 闸门）：默认拒绝后放行。
+	// 两侧判定共用同一 AllowInsecure 配置，显式 opt-in 一次即可贯通。
+	WithInsecureAlgorithms = crypto.WithInsecureAlgorithms
 )

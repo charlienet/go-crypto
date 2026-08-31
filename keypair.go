@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
@@ -116,6 +117,11 @@ func (kp *KeyPair) Reset() {
 		for i := range k {
 			k[i] = 0
 		}
+	case *ecdh.PrivateKey:
+		// *ecdh.PrivateKey 内部标量不暴露可变缓冲区：Bytes() 返回的是
+		// 拷贝，标准库未提供原地清零入口，故此处无字节级擦除动作，
+		// 置 nil（本函数末尾统一执行）即兜底策略——断开引用交由 GC 回收，
+		// 与 keymgr 解析路径对 DER 缓冲的显式清零配合完成内存卫生。
 	}
 	kp.PrivateKey = nil
 	kp.PublicKey = nil

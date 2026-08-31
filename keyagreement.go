@@ -39,6 +39,19 @@ type KeyAgreement interface {
 	Name() string
 }
 
+// KeyDeriver 一步式密钥派生协商的可选扩展接口。
+//
+// 实现 KeyAgreement 的协商器可选择性实现本接口，在 DeriveSharedSecret
+// 之上提供"共享秘密 + KDF"的一体化派生语义（如未来的 SM2 KAP 可实现
+// 标准密钥确认派生）；当前内置协商器（ECDH/X25519/SM2）均未实现，
+// 调用方使用 agreement.DeriveKey 时会经该断言，未命中则走通用回退
+// （DeriveSharedSecret → HKDF-SHA256 → 及时清零中间秘密）。
+type KeyDeriver interface {
+	// DeriveKey 从协商的共享秘密一步派生 keyLen 字节密钥。
+	// 对端公钥必须来自认证通道，防止中间人替换；salt/info 用于域分离。
+	DeriveKey(peer crypto.PublicKey, salt, info []byte, keyLen int) ([]byte, error)
+}
+
 // NewKeyAgreement 创建密钥协商器。
 // 预定义算法仅支持 ECDH/X25519/SM2（RSA/ECDSA/ED25519 属非对称加解密，直接拒绝）；
 // 非预定义值（自定义算法/拼写错误）查询注册表，未注册时报

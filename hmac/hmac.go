@@ -11,6 +11,7 @@ import (
 	"hash"
 	"strings"
 
+	"github.com/charlienet/go-crypto/common"
 	"github.com/charlienet/go-utils/bytex"
 	"github.com/emmansun/gmsm/sm3"
 )
@@ -32,6 +33,9 @@ type HMacComparer struct {
 	hashFunc HMacFunc
 }
 
+// New 构造 HMAC 比较器。key 内部拷贝保存（append([]byte(nil), key...)，
+// 与 asym/ed25519.go 的注入拷贝模式一致），调用方后续修改原切片不影响
+// 本实例持有的密钥副本。
 func New(fname string, key []byte) (*HMacComparer, error) {
 	f, err := ByName(fname)
 	if err != nil {
@@ -39,9 +43,18 @@ func New(fname string, key []byte) (*HMacComparer, error) {
 	}
 
 	return &HMacComparer{
-		key:      key,
+		key:      append([]byte(nil), key...),
 		hashFunc: f,
 	}, nil
+}
+
+// Zero 清零并释放持有的密钥副本（common.ZeroBytes + 置 nil），
+// 用于及时擦除敏感内存。清零后本实例不可再用于验证（Verify 恒返回
+// false），Sign 以 nil key 调用不会 panic 但产出无密钥意义的 HMAC，
+// 调用方须避免复用已 Zero 的实例。
+func (c *HMacComparer) Zero() {
+	common.ZeroBytes(c.key)
+	c.key = nil
 }
 
 func (c *HMacComparer) Sign(msg []byte) (bytex.Bytes, error) {
@@ -50,6 +63,12 @@ func (c *HMacComparer) Sign(msg []byte) (bytex.Bytes, error) {
 }
 
 func (c *HMacComparer) Verify(msg, target []byte) bool {
+	// Zero 后 key 为 nil：直接失败，避免以空密钥算出 HMAC 产生
+	// "验证通过"的假象（亦无 panic 风险）。
+	if c.key == nil {
+		return false
+	}
+
 	ret := c.hashFunc(c.key, msg)
 
 	// 长度不等直接返回 false，避免进入常量时间比较
@@ -66,7 +85,7 @@ func ByName(name string) (HMacFunc, error) {
 		return f, nil
 	}
 
-	return nil, fmt.Errorf("unsupported hash function %q, supported: md5, sha1, sha224, sha256, sha384, sha512, sm3", name)
+	return nil, fmt.Errorf("unsupported HMAC function %q, supported: md5, sha1, sha224, sha256, sha384, sha512, sm3", name)
 }
 
 // Deprecated: HMAC-MD5 虽然仍安全，但建议迁移到更现代的算法。

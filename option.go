@@ -98,7 +98,14 @@ func WithPadding(padding Padding) Option {
 //
 // 仅在对接遗留系统时必须使用。新代码应使用 AES + GCM。
 func WithInsecureAlgorithms() Option {
+	return allowInsecureOpt(true)
+}
+
+// allowInsecureOpt 内部辅助：按布尔值构造 AllowInsecure 设置选项。
+// 根包协议层 prepare 在闸门放行后，用它将策略透传给低层
+// NewCipher/NewECB（协议层判定与低层判定必须基于同一配置）。
+func allowInsecureOpt(allow bool) Option {
 	return func(cfg *Config) {
-		cfg.AllowInsecure = true
+		cfg.AllowInsecure = allow
 	}
 }

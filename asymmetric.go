@@ -2,15 +2,26 @@ package crypto
 
 import (
 	"crypto"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/charlienet/go-utils/bytex"
 )
+
+// ErrInvalidAsymOption 非对称选项参数非法时返回的统一哨兵（包装错误消息
+// 附具体参数细节）。选项返回 error（AsymOption 签名），在工厂构造入口
+// 应用选项时即被拒绝，未消费非法配置的实例。
+var ErrInvalidAsymOption = errors.New("crypto: invalid asymmetric option")
 
 // KeyPair 已迁移到 keypair.go
 // LegacyKeyPair 已删除：其 Base64 字段可被 encoding/json 直接序列化导致私钥泄露，
 // 请使用 KeyPair（含 json:"-" 防护与 MarshalJSON/UnmarshalJSON 禁止）。
 // 非对称加密算法
+//
+// 注意：GenerateKey / WithPrivateKey（含对象与字符串注入路径）成功设置
+// 私钥后，同实例的公钥能力自动派生（puk 回填），可直接调用 Verify 验签
+// 与 Encrypt 加密，无需另行注入公钥。
 type Asymmetric interface {
 	GenerateKey() (KeyPair, error)
 	WithPrivateKey(privateKey string) error
@@ -65,11 +76,32 @@ func NewAsymmetric(algorithm AsymmetricAlgorithm, opts ...AsymOption) (Asymmetri
 // 构造完成后不再被读取，调用方不得跨构造复用。
 // 字符串密钥（PublicKey/PrivateKey）为 base64 DER 编码；
 // 对象密钥（PublicKeyObject/PrivateKeyObject）为 crypto.PublicKey/crypto.PrivateKey 实现。
+//
+// 参数默认值（0 值 → 默认）由各算法实现消费时归一：
+//   - RSAKeyBits：0 → 2048；经 WithRSAKeyBits 显式传 <2048 在选项应用期拒绝
+//   - ECDSACurve："" → P256（经 WithECDSACurve 显式传非白名单值拒绝）
+//   - Hash：0 → SHA256（经 WithAsymHash 显式传白名单外摘要算法拒绝）
+//   - SM2UID：nil → gmsm 默认 UID（经 WithSM2UID 显式覆盖）
+//   - SM2LegacyCipher：false → 使用新认证密文格式（C1C3C2）；true → 遗留
+//     非认证格式（C1C2C3），仅对接遗留系统时启用
 type AsymConfig struct {
 	PublicKey        string
 	PrivateKey       string
 	PublicKeyObject  crypto.PublicKey
 	PrivateKeyObject crypto.PrivateKey
+
+	// RSAKeyBits RSA 密钥位数。0 → 2048（默认）；显式传值必须 >=2048。
+	RSAKeyBits int
+	// ECDSACurve ECDSA 曲线名。"" → P256；白名单 P256/P384/P521
+	//（输入大小写不敏感、忽略连字符，存储为规范形式 "P256"/"P384"/"P521"）。
+	ECDSACurve string
+	// Hash 签名摘要算法。0 → SHA256；白名单 SHA-256/SHA-384/SHA-512。
+	Hash crypto.Hash
+	// SM2UID SM2 用户标识。nil → gmsm 库默认 UID（"1234567812345678"）。
+	SM2UID []byte
+	// SM2LegacyCipher 使用 SM2 遗留非认证密文格式（C1C2C3）。
+	// 默认 false：新认证格式（C1C3C2）。仅对接遗留系统时启用。
+	SM2LegacyCipher bool
 }
 
 // AsymOption 非对称构造选项函数。返回 error：选项在构造期可失败，
@@ -104,6 +136,92 @@ func WithPrivateKeyObject(key crypto.PrivateKey) AsymOption {
 func WithPublicKeyObject(key crypto.PublicKey) AsymOption {
 	return func(cfg *AsymConfig) error {
 		cfg.PublicKeyObject = key
+		return nil
+	}
+}
+
+// 曲线白名单：ECDSA 支持的标准曲线（P-224 因安全性不足被禁用）。
+// 键为去掉连字符并大写后的规范名，输入经同样归一化后匹配。
+var ecdsaCurveWhitelist = map[string]struct{}{
+	"P256": {},
+	"P384": {},
+	"P521": {},
+}
+
+// normalizeCurveName 将曲线名归一为规范形式（去连字符、大写，
+// 如 "p-256"/"P_256" → "P256"）；空串原样返回（表示走默认值）。
+func normalizeCurveName(curve string) string { return strings.ToUpper(strings.ReplaceAll(curve, "-", "")) }
+
+// WithRSAKeyBits 设置 RSA 密钥位数（默认 2048）。
+// 显式传值必须 >=2048（小于 2048 已在选项应用期拒绝，返回
+// ErrInvalidAsymOption）；0 表示走默认值。与 GenerateKeyPair 的
+// KeyGenOption.WithKeySize 语义一致，两者互不干扰（本选项作用于
+// AsymConfig 构造路径）。
+func WithRSAKeyBits(bits int) AsymOption {
+	return func(cfg *AsymConfig) error {
+		if bits != 0 && bits < 2048 {
+			return fmt.Errorf("%w: RSA key bits %d below minimum 2048", ErrInvalidAsymOption, bits)
+		}
+		cfg.RSAKeyBits = bits
+		return nil
+	}
+}
+
+// WithECDSACurve 设置 ECDSA 曲线名称。
+// 白名单：P256 / P384 / P521（P-224 已禁用）；大小写不敏感、忽略连字符，
+// 存储为规范形式（"P256" 等）。"" 表示走默认 P256。非法曲线在选项应用期
+// 返回 ErrInvalidAsymOption。与 GenerateKeyPair 的 KeyGenOption.WithCurve
+// 语义一致，两者互不干扰（本选项作用于 AsymConfig 构造路径）。
+func WithECDSACurve(curve string) AsymOption {
+	return func(cfg *AsymConfig) error {
+		if curve == "" {
+			cfg.ECDSACurve = ""
+			return nil
+		}
+		norm := normalizeCurveName(curve)
+		if _, ok := ecdsaCurveWhitelist[norm]; !ok {
+			return fmt.Errorf("%w: unsupported ECDSA curve %q (whitelist: P256/P384/P521)", ErrInvalidAsymOption, curve)
+		}
+		cfg.ECDSACurve = norm
+		return nil
+	}
+}
+
+// WithAsymHash 设置签名摘要算法（默认 SHA256）。
+// 白名单：SHA-256/SHA-384/SHA-512；0 表示走默认。白名单外返回值
+// ErrInvalidAsymOption。命名用 AsymHash 前缀以区别于 keypair.go 的
+// KeyGenOption（KeyGenOption 无对应哈希选项，预留命名空间避免未来混淆）。
+func WithAsymHash(h crypto.Hash) AsymOption {
+	return func(cfg *AsymConfig) error {
+		if h == 0 {
+			cfg.Hash = 0
+			return nil
+		}
+		switch h {
+		case crypto.SHA256, crypto.SHA384, crypto.SHA512:
+			cfg.Hash = h
+			return nil
+		}
+		return fmt.Errorf("%w: unsupported hash %v (whitelist: SHA256/SHA384/SHA512)", ErrInvalidAsymOption, h)
+	}
+}
+
+// WithSM2UID 设置 SM2 用户标识 UID（内部拷贝保存）。
+// nil/未设置 → gmsm 默认 UID（"1234567812345678"）。与 gmsm 对接时，
+// 若对端使用非默认 UID，必须显式传入相同 UID，否则签名校验失败。
+func WithSM2UID(uid []byte) AsymOption {
+	return func(cfg *AsymConfig) error {
+		cfg.SM2UID = append([]byte(nil), uid...)
+		return nil
+	}
+}
+
+// WithSM2LegacyCiphertext 使用 SM2 遗留非认证密文格式（C1C2C3）。
+// 默认使用新认证格式（C1C3C2，密文携带 SM3 摘要可检测篡改）；
+// 仅对接使用遗留格式的系统时启用本选项。
+func WithSM2LegacyCiphertext() AsymOption {
+	return func(cfg *AsymConfig) error {
+		cfg.SM2LegacyCipher = true
 		return nil
 	}
 }

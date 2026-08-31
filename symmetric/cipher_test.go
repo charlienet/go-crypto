@@ -295,8 +295,8 @@ func TestECBWithNoPadding(t *testing.T) {
 	cipher, err := NewCipher("AES", key)
 	assert.NoError(t, err)
 
-	// 使用 ECB 模式和 NoPadding
-	ecb, err := cipher.NewECB(WithPadding(crypto.NoPadding{}))
+	// 使用 ECB 模式和 NoPadding（ECB 不安全，显式放行）
+	ecb, err := cipher.NewECB(WithPadding(crypto.NoPadding{}), WithInsecureAlgorithms())
 	assert.NoError(t, err)
 
 	// 加密
@@ -339,7 +339,7 @@ func TestDefaultPKCS7Padding(t *testing.T) {
 	assert.Equal(t, plaintext, []byte(decrypted))
 
 	// 使用 ECB 模式，不指定填充（应该使用默认的 PKCS7）
-	ecb, err := cipher.NewECB()
+	ecb, err := cipher.NewECB(WithInsecureAlgorithms())
 	assert.NoError(t, err)
 
 	// 加密
@@ -406,6 +406,47 @@ func TestBlockSize(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// ==================== KeySize/IVSize（P3#22：BlockSize 拆分） ====================
+
+// TestKeySizeIVSize BlockSize 拆分出的 KeySize/IVSize：
+// 元数据读取自注册表 CipherFactory，支持泛名归一（"AES" → "AES-128"）。
+func TestKeySizeIVSize(t *testing.T) {
+	cases := []struct {
+		alg     string
+		wantKey int
+		wantIV  int
+	}{
+		{"AES", 16, 16},     // 泛名归一到 AES-128
+		{"AES-128", 16, 16},
+		{"AES-192", 24, 16},
+		{"AES-256", 32, 16},
+		{"SM4", 16, 16},
+		{"DES", 8, 8},
+		{"3DES", 24, 8},
+	}
+	for _, c := range cases {
+		ks, err := crypto.KeySize(c.alg)
+		require.NoError(t, err, "KeySize(%s)", c.alg)
+		assert.Equal(t, c.wantKey, ks, "KeySize(%s)", c.alg)
+
+		iv, err := crypto.IVSize(c.alg)
+		require.NoError(t, err, "IVSize(%s)", c.alg)
+		assert.Equal(t, c.wantIV, iv, "IVSize(%s)", c.alg)
+
+		// BlockSize 转调二者后行为一致（含泛名）
+		bs, biv, err := crypto.BlockSize(c.alg)
+		require.NoError(t, err, "BlockSize(%s)", c.alg)
+		assert.Equal(t, c.wantKey, bs, "BlockSize(%s) keySize", c.alg)
+		assert.Equal(t, c.wantIV, biv, "BlockSize(%s) ivSize", c.alg)
+	}
+
+	// 未知算法 → error
+	_, err := crypto.KeySize("INVALID")
+	assert.Error(t, err)
+	_, err = crypto.IVSize("INVALID")
+	assert.Error(t, err)
+}
+
 // ==================== ECB 模式 ====================
 
 func TestECB(t *testing.T) {
@@ -413,7 +454,7 @@ func TestECB(t *testing.T) {
 	cipher, err := NewCipher("AES", key)
 	assert.NoError(t, err)
 
-	ecb, err := cipher.NewECB()
+	ecb, err := cipher.NewECB(WithInsecureAlgorithms())
 	assert.NoError(t, err)
 
 	plaintext := []byte("hello world!!!") // 填充后对齐块
@@ -781,8 +822,8 @@ func TestNewCTR_InvalidIVLength(t *testing.T) {
 	ct := s.XORKeyStream([]byte("hello"))
 	assert.Len(t, ct, 5)
 
-	// DES（8B 块）的合法/非法长度
-	c8, err := NewCipher("DES", []byte("01234567"))
+	// DES（8B 块）的合法/非法长度（DES 不安全，显式放行构造）
+	c8, err := NewCipher("DES", []byte("01234567"), WithInsecureAlgorithms())
 	assert.NoError(t, err)
 	_, err = c8.NewCTR(make([]byte, 8))
 	require.NoError(t, err, "DES 8B IV 应正常构造")
@@ -905,11 +946,16 @@ func TestNewCipher_KeyLengthStrict(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid key length")
 
-	// 泛名 AES 允许 16/24/32 三选一
+	// 泛名 AES 归一到 AES-128：仅 16 字节密钥合法（P3#23 破坏性变更：
+	// 旧行为允许 16/24/32 三选一，现按规范名严格校验）
 	for _, l := range []int{16, 24, 32} {
 		c, err := NewCipher("AES", make([]byte, l))
-		require.NoError(t, err, "AES key length %d 应被接受", l)
-		assert.NotNil(t, c)
+		if l == 16 {
+			require.NoError(t, err, "AES key length 16 应接受（归一为 AES-128）")
+			assert.NotNil(t, c)
+			continue
+		}
+		assert.ErrorIs(t, err, crypto.ErrInvalidKeyLength, "泛名 AES %dB 应归一到 AES-128 后拒绝", l)
 	}
 }
 
@@ -1014,7 +1060,7 @@ func TestECB_Decrypt_Unaligned(t *testing.T) {
 	c, err := NewCipher("AES", key)
 	assert.NoError(t, err)
 
-	ecb, err := c.NewECB()
+	ecb, err := c.NewECB(WithInsecureAlgorithms())
 	assert.NoError(t, err)
 
 	// 15 字节密文：修复前切片越界 panic
@@ -1371,7 +1417,7 @@ func TestDecrypt_InputImmutable(t *testing.T) {
 		check(t, "CBC fixed iv", m, []byte(enc))
 	})
 	t.Run("ECB", func(t *testing.T) {
-		m, err := c.NewECB()
+		m, err := c.NewECB(WithInsecureAlgorithms())
 		require.NoError(t, err)
 		enc, err := m.Encrypt(plaintext)
 		require.NoError(t, err)

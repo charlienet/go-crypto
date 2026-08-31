@@ -38,8 +38,13 @@ type PKCS7 struct{}
 
 func (p PKCS7) Padding(blockSize int, src []byte) ([]byte, error) {
 	padding := blockSize - len(src)%blockSize
-	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
-	return append(src, padtext...), nil
+	// 恒拷贝新缓冲：直接 append 到 src 上时，若 cap(src) 足够会原地
+	// 写调用方底层数组，污染输入（ZeroPadding 全对齐分支已做同样隔离）。
+	// 写法参照 keymgr/pbes2.go pkcs7Pad；make 后必须先 copy(src)，
+	// 否则前 len(src) 字节为全零。
+	out := make([]byte, len(src), len(src)+padding)
+	copy(out, src)
+	return append(out, bytes.Repeat([]byte{byte(padding)}, padding)...), nil
 }
 
 func (p PKCS7) UnPadding(blockSize int, src []byte) ([]byte, error) {
@@ -141,6 +146,11 @@ type Cipher interface {
 // 并发安全：Encrypt/Decrypt 方法级并发安全（各实现不共享可变状态，
 // 同一实例可安全并发调用）；StreamCipher（CTR）持有流状态，其
 // XORKeyStream/Stream 非并发安全，并发场景请各自构造独立实例。
+//
+// 注意：CBC/CFB/OFB/CTR/ECB 等无认证模式（Decrypt 文档见各模式构造器）
+// 不提供消息认证，密文可被篡改而不被发现；除非对接遗留系统，应使用 GCM。
+// 解密来自不可信对端的 CBC 密文并向对端反馈解密成败将构成 padding oracle，
+// 详见 NewCBC 文档。
 type CipherMode interface {
 	Encrypt(plainText []byte) (bytex.Bytes, error)
 	Decrypt(cipherText []byte) (bytex.Bytes, error)
@@ -158,10 +168,20 @@ type StreamCipher interface {
 // 经注册表读取 CipherFactory 元数据（KeySize/IVSize；nonce 固定 12 字节），
 // 三次独立分配与随机填充：避免 key/iv/nonce 共享同一底层数组，
 // 防止调用方修改其中一个切片时意外影响另外两个。
-func GenerateKey(algorithm string) (key, iv, nonce []byte, err error) {
-	f, err := CipherFactoryFor(algorithm)
+//
+// 不安全算法闸门：算法在注册表被判为 Insecure（DES/3DES，见
+// CipherFactory.Insecure 元数据）时，默认返回 ErrInsecureAlgorithm；
+// 传 WithInsecureAlgorithms() 显式放行后方可生成。
+//
+// 算法名支持泛名归一（"AES" → "AES-128"，经 NormalizeAlgorithm）。
+func GenerateKey(algorithm string, opts ...Option) (key, iv, nonce []byte, err error) {
+	f, err := lookupCipherFactory(algorithm)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+
+	if f.Insecure && !ApplyOptions(opts).AllowInsecure {
+		return nil, nil, nil, fmt.Errorf("%s: %w", algorithm, ErrInsecureAlgorithm)
 	}
 
 	key = make([]byte, f.KeySize)
@@ -180,15 +200,39 @@ func GenerateKey(algorithm string) (key, iv, nonce []byte, err error) {
 	return key, iv, nonce, nil
 }
 
-// BlockSize 返回算法的密钥长度和 IV 长度。未知算法返回 error。
-// 注意：函数名中的 "BlockSize" 沿袭历史命名，实际返回 (keySize, ivSize)。
+// KeySize 返回算法的密钥长度（字节）；未知算法返回 error。
+// 经注册表读取 CipherFactory.KeySize 元数据，支持泛名归一（"AES" → "AES-128"）。
+func KeySize(algorithm string) (int, error) {
+	f, err := lookupCipherFactory(algorithm)
+	if err != nil {
+		return 0, err
+	}
+	return f.KeySize, nil
+}
+
+// IVSize 返回算法的 IV 长度（字节）；未知算法返回 error。
+// 经注册表读取 CipherFactory.IVSize 元数据，支持泛名归一（"AES" → "AES-128"）。
+func IVSize(algorithm string) (int, error) {
+	f, err := lookupCipherFactory(algorithm)
+	if err != nil {
+		return 0, err
+	}
+	return f.IVSize, nil
+}
+
+// Deprecated: 函数名中的 "BlockSize" 沿袭历史命名，实际返回
+// (keySize, ivSize) 而非块大小，易误导；请改用 KeySize/IVSize。
+// 本函数保持既有行为不变：仍返回 (keySize, ivSize)，未知算法返回 error。
 func BlockSize(algorithm string) (blockSize, ivSize int, err error) {
-	f, err := CipherFactoryFor(algorithm)
+	ks, err := KeySize(algorithm)
 	if err != nil {
 		return 0, 0, err
 	}
-
-	return f.KeySize, f.IVSize, nil
+	iv, err := IVSize(algorithm)
+	if err != nil {
+		return 0, 0, err
+	}
+	return ks, iv, nil
 }
 
 // NewCipher 创建对称加密算法实例（经注册表分发）。
@@ -196,13 +240,24 @@ func BlockSize(algorithm string) (blockSize, ivSize int, err error) {
 // 未注册对应引擎时（多半是调用方未 blank import crypto/symmetric 子包）
 // 返回 "unsupported algorithm" 错误并提示导入路径。
 //
+// 不安全算法闸门：算法在注册表被判为 Insecure（DES/3DES，见
+// CipherFactory.Insecure 元数据）时，默认返回 ErrInsecureAlgorithm；
+// 传 WithInsecureAlgorithms() 显式放行后方可构造。ECB 等不安全模式
+// 的闸门在各自模式构造器（NewECB）内，同样经该选项放行。
+//
+// 算法名支持泛名归一（"AES" → "AES-128"，经 NormalizeAlgorithm）。
+//
 // 遗留算法警告：
 //   - DES/3DES：仅兼容遗留数据，禁止新用（块大小 8 字节，无法使用 GCM）。
 //   - ECB/CTR：不安全，详见各自构造函数（NewECB / NewCTR）的 Deprecated 标注。
-func NewCipher(algorithm string, key []byte) (Cipher, error) {
-	f, err := CipherFactoryFor(algorithm)
+func NewCipher(algorithm string, key []byte, opts ...Option) (Cipher, error) {
+	f, err := lookupCipherFactory(algorithm)
 	if err != nil {
 		return nil, fmt.Errorf("no engine registered for %s; add blank import: _ \"github.com/charlienet/go-crypto/symmetric\" or _ \"github.com/charlienet/go-crypto/engines\" for all: %w", algorithm, ErrEngineNotRegistered)
+	}
+
+	if f.Insecure && !ApplyOptions(opts).AllowInsecure {
+		return nil, fmt.Errorf("%s: %w", algorithm, ErrInsecureAlgorithm)
 	}
 
 	return f.New(key)

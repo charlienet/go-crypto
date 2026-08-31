@@ -24,6 +24,16 @@ func NewEncryptor(alg Algorithm, mode Mode, opts ...Option) (*Encryptor, error) 
 		return nil, err
 	}
 
+	// 密钥字节仅构造期使用（Cipher 已持有内部拷贝），取得副本后
+	// 立即挂 defer 清零：无论后续 ModeExecutorFor/冻结快照等任何
+	// 步骤失败，敏感密钥字节都被擦除；成功路径行为不变
+	//（frozen 快照不含 Key，见下方冻结逻辑）。
+	defer func() {
+		common.ZeroBytes(cfg.Key)
+		cfg.Key = nil
+		cfg.KeyError = nil
+	}()
+
 	ex, err := ModeExecutorFor(mode)
 	if err != nil {
 		return nil, fmt.Errorf("%w: mode %s (import crypto/symmetric)", err, mode)
@@ -31,20 +41,17 @@ func NewEncryptor(alg Algorithm, mode Mode, opts ...Option) (*Encryptor, error) 
 
 	// 冻结配置快照：IV/Nonce 拷贝（WithIV/WithNonce 已拷贝一次，此处再拷贝
 	// 保证快照与一切外部切片彻底隔离）；AAD 在 WithAAD 内已拷贝，Padding
-	// 为不可变接口引用，均可直接复用。
+	// 为不可变接口引用，均可直接复用。AllowInsecure 一并冻结：ECB 等
+	// 不安全模式的低层闸门（NewECB）在执行器 Encrypt/Decrypt 时读取。
 	frozen := &Config{
-		EmbedIV:    cfg.EmbedIV,
-		EmbedNonce: cfg.EmbedNonce,
-		AAD:        cfg.AAD,
-		Padding:    cfg.Padding,
-		IV:         append([]byte(nil), cfg.IV...),
-		Nonce:      append([]byte(nil), cfg.Nonce...),
+		EmbedIV:       cfg.EmbedIV,
+		EmbedNonce:    cfg.EmbedNonce,
+		AAD:           cfg.AAD,
+		Padding:       cfg.Padding,
+		AllowInsecure: cfg.AllowInsecure,
+		IV:            append([]byte(nil), cfg.IV...),
+		Nonce:         append([]byte(nil), cfg.Nonce...),
 	}
-
-	// 密钥字节仅构造期使用（Cipher 已持有内部拷贝），及时清零擦除。
-	common.ZeroBytes(cfg.Key)
-	cfg.Key = nil
-	cfg.KeyError = nil
 
 	return &Encryptor{alg: alg, mode: mode, c: c, cfg: frozen, executor: ex}, nil
 }

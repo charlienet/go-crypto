@@ -35,10 +35,6 @@ const pbes2PBKDF2Iterations = 600_000
 // 用于防御恶意 PEM（如 IterationCount=2^31-1）对解密路径的 DoS 攻击。
 const pbes2MaxIterations = 10_000_000
 
-// pbes2MaxKeyLen 解密侧接受的 PBKDF2 派生密钥最大长度（字节）。
-// AES-256-CBC 需要 32 字节，预留安全余量；超限拒绝，防恶意 keyLen 放大内存。
-const pbes2MaxKeyLen = 64
-
 type asn1AlgorithmIdentifier struct {
 	Algorithm  asn1.ObjectIdentifier
 	Parameters asn1.RawValue `asn1:"optional"`
@@ -201,11 +197,13 @@ func decryptPBES2PrivateKey(der, password []byte) ([]byte, error) {
 
 	keyLen := p2k.KeyLength
 	if keyLen <= 0 {
-		// AES-256-CBC 需要 32 字节密钥
+		// 省略 KeyLength（RFC 8018 为可选字段）：按加密方案 AES-256-CBC
+		// 推断为 32 字节密钥。
 		keyLen = 32
-	} else if keyLen > pbes2MaxKeyLen {
-		// 派生密钥长度上限：防恶意 KeyLength 放大派生内存
-		return nil, errors.New("invalid PBKDF2 key length")
+	} else if keyLen != 32 {
+		// 显式给出的 KeyLength 必须与加密方案（AES-256-CBC）密钥长度精确一致，
+		// 拒绝恶意 DER（如 KeyLength=16）把派生密钥弱化为 128 位的降级攻击。
+		return nil, fmt.Errorf("invalid PBKDF2 key length %d: AES-256-CBC requires 32 bytes", keyLen)
 	}
 	// 注：crypto/pbkdf2 标准库 API 仅接受 string 密码，string 转换会留下
 	// 不可清零的副本，这是标准库 API 限制，无法规避。

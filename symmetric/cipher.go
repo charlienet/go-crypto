@@ -14,42 +14,69 @@ import (
 	"github.com/emmansun/gmsm/sm4"
 )
 
-// supported 对称算法表：算法键与根包注册表键一致（共 7 键，含 "AES" 别名键）。
-// creator 记录底层块构造器与密钥/IV 长度元数据（CipherFactory.KeySize/IVSize 由此派生）。
+// supported 对称算法表：算法键与根包注册表键一致（共 6 键，规范名；
+// 泛名 "AES" 经 NormalizeAlgorithm 归一为 "AES-128" 后查表）。
+// creator 记录底层块构造器、密钥/IV 长度元数据与不安全算法标记
+//（CipherFactory.KeySize/IVSize/Insecure 由此派生）。
 var supported = map[string]*creator{
-	"SM4":     {sm4.NewCipher, sm4.BlockSize, sm4.BlockSize},
-	"AES":     {aes.NewCipher, aes.BlockSize, aes.BlockSize},
-	"AES-128": {aes.NewCipher, aes.BlockSize, aes.BlockSize},
-	"AES-192": {aes.NewCipher, 24, aes.BlockSize},
-	"AES-256": {aes.NewCipher, 32, aes.BlockSize},
-	"DES":     {des.NewCipher, des.BlockSize, des.BlockSize},
-	"3DES":    {des.NewTripleDESCipher, 24, des.BlockSize},
+	"SM4":     {sm4.NewCipher, sm4.BlockSize, sm4.BlockSize, false},
+	"AES-128": {aes.NewCipher, aes.BlockSize, aes.BlockSize, false},
+	"AES-192": {aes.NewCipher, 24, aes.BlockSize, false},
+	"AES-256": {aes.NewCipher, 32, aes.BlockSize, false},
+	"DES":     {des.NewCipher, des.BlockSize, des.BlockSize, true},
+	"3DES":    {des.NewTripleDESCipher, 24, des.BlockSize, true},
 }
 
 // creator 底层块构造器与长度元数据。
 type creator struct {
-	new     func(key []byte) (cipher.Block, error)
-	keySize int // 密钥长度（AES-128:16, AES-192:24, AES-256:32, SM4:16, DES:8, 3DES:24）
-	ivSize  int
+	new      func(key []byte) (cipher.Block, error)
+	keySize  int // 密钥长度（AES-128:16, AES-192:24, AES-256:32, SM4:16, DES:8, 3DES:24）
+	ivSize   int
+	insecure bool // 不安全算法（DES/3DES）：NewCipher 默认拒绝，须 WithInsecureAlgorithms() 放行
 }
 
-// newCipher 按算法名构造对称算法实例（CipherFactory.New 与本包 NewCipher 共用）。
+// newCipher 按算法名构造对称算法实例（低层 NewCipher 专用路径），
+// 查表前先经 NormalizeAlgorithm 归一化（"AES"/"aes" → "AES-128"）；
+// 泛名归一后密钥长度按规范名严格校验（AES-128 仅 16 字节）。
 //
-// AES 系列按算法名严格校验密钥长度：
-// AES-128/192/256 必须精确匹配（防止弱化降级，如 AES-256 配 16 字节密钥）；
-// 泛名 "AES" 允许 16/24/32 三选一。
-// SM4/DES/3DES 由各自实现自带长度校验，此处不改动。
-func newCipher(name string, key []byte) (crypto.Cipher, error) {
+// 不安全算法闸门：DES/3DES 默认返回 ErrInsecureAlgorithm（与根包
+// NewCipher 经注册表元数据 Insecure 的判定一致），传
+// WithInsecureAlgorithms() 显式放行。注册表工厂闭包（register.go）
+// 走 newBlockCipher 跳过闸门——根包 NewCipher 在注册表层已检查。
+func newCipher(name string, key []byte, opts ...Option) (crypto.Cipher, error) {
+	if !crypto.ApplyOptions(opts).AllowInsecure && isInsecureName(name) {
+		return nil, fmt.Errorf("%s: %w", name, crypto.ErrInsecureAlgorithm)
+	}
+	return newBlockCipher(name, key)
+}
+
+// isInsecureName 按算法名判断是否属不安全算法（DES/3DES）。
+// 注册表元数据（CipherFactory.Insecure + creator.insecure）为驱动源；
+// 本函数仅在低层 direct 构造前做前置快速判定，避免依赖注册表状态。
+func isInsecureName(name string) bool {
+	norm, err := crypto.NormalizeAlgorithm(name)
+	if err != nil {
+		return false
+	}
+	switch norm {
+	case "DES", "3DES":
+		return true
+	}
+	return false
+}
+
+// newBlockCipher 长度校验 + 块构造（不含安全闸门）。
+// 供注册表工厂闭包（根包 NewCipher 放行后）与本包 NewCipher 复用：
+// AES 系列按规范名严格校验密钥长度（AES-128/192/256 必须精确匹配，
+// 防止弱化降级，如 AES-256 配 16 字节密钥）；SM4/DES/3DES 由各自
+// 实现自带长度校验，此处不改动。
+func newBlockCipher(name string, key []byte) (crypto.Cipher, error) {
 	c, ok := supported[name]
 	if !ok {
 		return nil, fmt.Errorf("unsupported algorithm: %s", name)
 	}
 
 	switch name {
-	case "AES":
-		if len(key) != 16 && len(key) != 24 && len(key) != 32 {
-			return nil, fmt.Errorf("%w: invalid key length %d for AES, want 16, 24 or 32", crypto.ErrInvalidKeyLength, len(key))
-		}
 	case "AES-128", "AES-192", "AES-256":
 		if len(key) != c.keySize {
 			return nil, fmt.Errorf("%w: invalid key length %d for %s, want %d", crypto.ErrInvalidKeyLength, len(key), name, c.keySize)
@@ -66,8 +93,14 @@ func newCipher(name string, key []byte) (crypto.Cipher, error) {
 
 // NewCipher 直接构造对称算法实例（不经注册表，行为与根包 NewCipher 一致；
 // 根包 NewCipher 经注册表分发最终也落到同一构造路径）。
-func NewCipher(name string, key []byte) (crypto.Cipher, error) {
-	return newCipher(name, key)
+// 算法名支持泛名归一（"AES" → "AES-128"）。不安全算法（DES/3DES）
+// 默认拒绝（ErrInsecureAlgorithm），传 WithInsecureAlgorithms() 放行。
+func NewCipher(name string, key []byte, opts ...Option) (crypto.Cipher, error) {
+	norm, err := crypto.NormalizeAlgorithm(name)
+	if err == nil {
+		name = norm
+	}
+	return newCipher(name, key, opts...)
 }
 
 // symmetric 对称算法实例实现。
@@ -111,6 +144,11 @@ type streamCipher struct {
 //
 // 替代方案：优先使用 GCM（认证加密，原生防篡改）；如确需流式 CTR，
 // 必须自行叠加 MAC 并保持 Encrypt-then-MAC 顺序。
+// NewCTR 创建 CTR 流加密对象，使用固定计数器值（计数器长度校验 = 块大小）。
+//
+// Deprecated: 本模式无认证（不提供消息认证，密文可被篡改而不被发现），
+// 仅限遗留协议兼容；除非对接遗留系统，应使用 GCM。
+// 若确需流式 CTR，必须与独立 MAC 组合（Encrypt-then-MAC 顺序）。
 func (a *symmetric) NewCTR(iv []byte) (StreamCipher, error) {
 	// 显式校验计数器长度：标准库 cipher.NewCTR 接受任意长度 IV，
 	// 但长度非块大小时计数器语义不符合预期，且这是公开 API 不允许 panic 的边界。
@@ -263,6 +301,11 @@ func (a *symmetric) newCBC(iv []byte, cfg *Config) (*algo_cbc, error) {
 // 警告：固定 IV 下同一 mode 对象仅允许 Encrypt 一次——每次 Encrypt 都从相同
 // IV 重新初始化，重复 Encrypt 复用完全相同 keystream（C1⊕C2 = P1⊕P2 直接泄露
 // 明文）。每条消息应使用新 IV，推荐使用 NewCBCWithRandomIV。
+//
+// 安全警告：CBC 模式不提供消息认证，密文可被篡改而不被发现（bit-flipping
+// 可定向翻转明文而解密无失败信号）；除非对接遗留系统，应使用 GCM。
+// 解密来自不可信对端的 CBC 密文并向对端反馈解密成败将构成 padding oracle
+// 攻击面：填充错误与解密成功与否的差异可被逐字节恢复明文。
 func (a *symmetric) NewCBC(iv []byte, opts ...Option) (CipherMode, error) {
 	return a.newCBC(iv, a.applyOpts(opts))
 }
@@ -353,16 +396,24 @@ func (a *algo_cbc) Decrypt(ciphertext []byte) (bytex.Bytes, error) {
 
 // --- ECB ---
 
-// Deprecated: 不安全，仅限遗留数据兼容。
+// Deprecated: 不安全，默认拒绝（ErrInsecureAlgorithm），须显式传
+// WithInsecureAlgorithms() 放行（设计决策：与 NewCipher/GenerateKey 的
+// 不安全算法闸门共用同一选项体系，破坏面最小——不放行即拒绝，放行
+// 即与既有行为一致；无需额外的 NewECBWithInsecure 入口）。
 //
 // ECB 模式下相同明文块产生相同密文块，直接泄露数据模式与重复信息，
-// 不应视为安全加密。仅适用于遗留数据兼容或非安全格式转换
-// （如某些行业存量格式），禁止用于新系统加密。
+// 不应视为安全加密，且不提供消息认证（密文可被篡改而不被发现）。
+// 仅适用于遗留数据兼容或非安全格式转换（如某些行业存量格式），
+// 禁止用于新系统加密；除非对接遗留系统，应使用 GCM。
 //
 // 替代方案：优先使用 GCM AEAD（NewGCMWithRandomNonce）；如需分块流式
 // 加密，请使用 crypto/envelope 子包的 fsb1 流式 API。
 func (a *symmetric) NewECB(opts ...Option) (CipherMode, error) {
 	cfg := a.applyOpts(opts)
+
+	if !cfg.AllowInsecure {
+		return nil, fmt.Errorf("ECB: %w", crypto.ErrInsecureAlgorithm)
+	}
 
 	if cfg.AAD != nil {
 		return nil, errors.New("WithAAD 仅支持 GCM")
@@ -403,6 +454,9 @@ func (a *symmetric) newCFB(iv []byte, cfg *Config) (*algo_cfb, error) {
 // 警告：固定 IV 下同一 mode 对象仅允许 Encrypt 一次——每次 Encrypt 都从相同
 // IV 重新初始化，重复 Encrypt 复用完全相同 keystream（C1⊕C2 = P1⊕P2 直接泄露
 // 明文）。每条消息应使用新 IV，推荐使用 NewCFBWithRandomIV。
+//
+// 安全警告：CFB 模式不提供消息认证，密文可被篡改而不被发现；除非对接
+// 遗留系统，应使用 GCM。
 func (a *symmetric) NewCFB(iv []byte, opts ...Option) (CipherMode, error) {
 	return a.newCFB(iv, a.applyOpts(opts))
 }
@@ -495,6 +549,9 @@ func (a *symmetric) newOFB(iv []byte, cfg *Config) (*algo_ofb, error) {
 // 警告：固定 IV 下同一 mode 对象仅允许 Encrypt 一次——每次 Encrypt 都从相同
 // IV 重新初始化，重复 Encrypt 复用完全相同 keystream（C1⊕C2 = P1⊕P2 直接泄露
 // 明文）。每条消息应使用新 IV，推荐使用 NewOFBWithRandomIV。
+//
+// 安全警告：OFB 模式不提供消息认证，密文可被篡改而不被发现（bit-flipping
+// 可直接改写明文）；除非对接遗留系统，应使用 GCM。
 func (a *symmetric) NewOFB(iv []byte, opts ...Option) (CipherMode, error) {
 	return a.newOFB(iv, a.applyOpts(opts))
 }

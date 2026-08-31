@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"os"
 
@@ -126,12 +127,18 @@ func LoadPublicKeyPair(filename string, format KeyFormat) (*rootcrypto.KeyPair, 
 }
 
 // ParseKeyPair 解析密钥数据：先按私钥解析，失败后再按公钥解析。
+// 两条路径均失败时用 errors.Join 合并两侧原因返回，
+// 避免回退路径吞掉私钥侧的真实错误（如加密 PEM 密码错误）。
 func ParseKeyPair(data []byte, format KeyFormat, opts ...LoadOption) (*rootcrypto.KeyPair, error) {
-	kp, err := ParsePrivateKeyPair(data, format, opts...)
-	if err == nil {
+	kp, errPriv := ParsePrivateKeyPair(data, format, opts...)
+	if errPriv == nil {
 		return kp, nil
 	}
-	return ParsePublicKeyPair(data, format)
+	kpPub, errPub := ParsePublicKeyPair(data, format)
+	if errPub == nil {
+		return kpPub, nil
+	}
+	return nil, errors.Join(errPriv, errPub)
 }
 
 // ParsePrivateKeyPair 解析私钥数据（PEM 加密格式经 PBES2/传统格式解密），

@@ -2,6 +2,7 @@ package keymgr
 
 import (
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
@@ -39,6 +40,10 @@ func marshalPublicKey(key crypto.PublicKey, format KeyFormat) ([]byte, error) {
 	case ed25519.PublicKey:
 		der, err = x509.MarshalPKIXPublicKey(k)
 		pemType = "PUBLIC KEY"
+	case *ecdh.PublicKey:
+		// NIST 曲线与 X25519 公钥均走标准库 SPKI（id-ecPublicKey / id-X25519）
+		der, err = x509.MarshalPKIXPublicKey(k)
+		pemType = "PUBLIC KEY"
 	default:
 		return nil, fmt.Errorf("unsupported public key type: %T", key)
 	}
@@ -55,6 +60,12 @@ func marshalPrivateKey(key crypto.PrivateKey, format KeyFormat, cfg *marshalConf
 	var err error
 	var pemType string
 
+	// 显式传入空密码（WithEncryptionPassword([]byte{})）属误用：
+	// 以 "无加密" 静默降级会误导调用方以为私钥已受保护，必须显式报错。
+	// 未传入加密选项（cfg.password == nil）仍走明文，行为不变。
+	if cfg != nil && cfg.password != nil && len(cfg.password) == 0 {
+		return nil, errors.New("empty encryption password")
+	}
 	// 加密仅支持 PEM 输出格式；其他格式与密码同时使用属误用，显式报错而非静默忽略
 	encrypted := cfg != nil && len(cfg.password) > 0
 	if encrypted && format != KeyFormatPEM {
@@ -90,6 +101,11 @@ func marshalPrivateKey(key crypto.PrivateKey, format KeyFormat, cfg *marshalConf
 		der, err = smx509.MarshalPKCS8PrivateKey(k)
 		pemType = "PRIVATE KEY"
 	case ed25519.PrivateKey:
+		der, err = x509.MarshalPKCS8PrivateKey(k)
+		pemType = "PRIVATE KEY"
+	case *ecdh.PrivateKey:
+		// x509.MarshalPKCS8PrivateKey 自 Go 1.20 起原生支持 *ecdh.PrivateKey
+		//（NIST 曲线编码为 id-ecPublicKey + namedCurve，X25519 为 id-X25519）。
 		der, err = x509.MarshalPKCS8PrivateKey(k)
 		pemType = "PRIVATE KEY"
 	default:
@@ -203,7 +219,11 @@ func unmarshalPrivateKeyWithPassword(data []byte, format KeyFormat, cfg *loadCon
 }
 
 func parsePrivateKeyDER(der []byte) (crypto.PrivateKey, error) {
-	// 首先尝试使用标准库解析PKCS8
+	// 首先尝试使用标准库解析PKCS8。
+	// 注意：标准库对 NIST 曲线 PKCS#8 一律回读为 *ecdsa.PrivateKey（而非
+	// *ecdh.PrivateKey），X25519 则回读为 *ecdh.PrivateKey——这正是
+	// agreement/ecdh.go WithPrivateKey 同时接受两类型的原因（存量私钥
+	// 经 PKCS#8 导出再导入后类型已漂移）。
 	key, err := x509.ParsePKCS8PrivateKey(der)
 	if err == nil {
 		return validateParsedPrivateKeyStrength(key)
@@ -299,6 +319,8 @@ func extractPublicKey(key crypto.PrivateKey) crypto.PublicKey {
 		return &k.PublicKey
 	case ed25519.PrivateKey:
 		return k.Public()
+	case *ecdh.PrivateKey:
+		return k.PublicKey()
 	default:
 		return nil
 	}
@@ -326,6 +348,18 @@ func detectAlgorithm(key any) string {
 		return "Ed25519"
 	case ed25519.PublicKey:
 		return "Ed25519"
+	case *ecdh.PrivateKey:
+		// NIST 曲线 ecdh 私钥（如 ecdh.P256() 生成）报 "ECDH"；
+		// X25519 曲线单列（协商算法名沿用生成器键 "X25519"）
+		if k.Curve() == ecdh.X25519() {
+			return "X25519"
+		}
+		return "ECDH"
+	case *ecdh.PublicKey:
+		if k.Curve() == ecdh.X25519() {
+			return "X25519"
+		}
+		return "ECDH"
 	default:
 		return ""
 	}

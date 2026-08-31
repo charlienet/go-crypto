@@ -20,6 +20,24 @@ type ecdsa_algo struct {
 	prk  *ecdsa.PrivateKey
 	puk  *ecdsa.PublicKey
 	hash crypto.Hash
+	// curve 签名/密钥生成使用的曲线（根包白名单 P256/P384/P521，默认 P256）。
+	curve elliptic.Curve
+}
+
+// ecdsaSignature ASN.1 DER 编码的 ECDSA 签名结构（SEQUENCE { r, s INTEGER }）。
+// 用于低 S 规范化时解析/重编码签名（本 Go 版本标准库未导出
+// ecdsa.ParseSignature/EncodeSignature，改用 asn1 编解码等价实现）。
+type ecdsaSignature struct {
+	R, S *big.Int
+}
+
+// ecdsaCurveByName ECDSA 曲线白名单映射（规范名 → 曲线对象）。
+// 曲线名由根包 WithECDSACurve 归一（"P256"/"P384"/"P521"），此处仅消费；
+// 防御性兜底：直接构造 cfg 绕过选项层时返回错误。
+var ecdsaCurveByName = map[string]elliptic.Curve{
+	"P256": elliptic.P256(),
+	"P384": elliptic.P384(),
+	"P521": elliptic.P521(),
 }
 
 // newECDSA 构造 ECDSA 非对称算法实例（注册表工厂签名）。
@@ -31,9 +49,23 @@ func newECDSA(opts ...rootcrypto.AsymOption) (rootcrypto.Asymmetric, error) {
 		}
 	}
 
-	algo := &ecdsa_algo{
-		hash: crypto.SHA256,
+	algo := &ecdsa_algo{}
+
+	// 消费 cfg.ECDSACurve（"" → 默认 P256）与 cfg.Hash（0 → 默认 SHA256）。
+	if cfg.ECDSACurve != "" {
+		curve, ok := ecdsaCurveByName[cfg.ECDSACurve]
+		if !ok {
+			return nil, fmt.Errorf("unsupported ECDSA curve %q (whitelist: P256/P384/P521)", cfg.ECDSACurve)
+		}
+		algo.curve = curve
+	} else {
+		algo.curve = elliptic.P256()
 	}
+	hash, err := asymHash(cfg.Hash)
+	if err != nil {
+		return nil, err
+	}
+	algo.hash = hash
 
 	if cfg.PrivateKeyObject != nil {
 		ecdsaKey, ok := cfg.PrivateKeyObject.(*ecdsa.PrivateKey)
@@ -46,6 +78,8 @@ func newECDSA(opts ...rootcrypto.AsymOption) (rootcrypto.Asymmetric, error) {
 			return nil, err
 		}
 		algo.prk = ecdsaKey
+		// 回填公钥：私钥注入后同实例可直接 Verify/Encrypt（公钥能力自动派生）。
+		algo.puk = &ecdsaKey.PublicKey
 	}
 
 	if cfg.PublicKeyObject != nil {
@@ -89,12 +123,14 @@ func (s *ecdsa_algo) Name() string {
 }
 
 func (s *ecdsa_algo) GenerateKey() (rootcrypto.KeyPair, error) {
-	// 使用 P256 曲线
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// 使用配置曲线（默认 P256；经 WithECDSACurve 可选用 P384/P521）
+	key, err := ecdsa.GenerateKey(s.curve, rand.Reader)
 	if err != nil {
 		return rootcrypto.KeyPair{}, err
 	}
 	s.prk = key
+	// 回填公钥：GenerateKey 后同实例可直接 Verify（公钥能力自动派生）。
+	s.puk = &key.PublicKey
 	return rootcrypto.KeyPair{PrivateKey: key, PublicKey: &key.PublicKey}, nil
 }
 
@@ -151,12 +187,23 @@ func (s *ecdsa_algo) Sign(data []byte) (bytex.Bytes, error) {
 		return nil, err
 	}
 
-	// 返回 ASN.1 DER 编码的签名
-	type ecdsaSignature struct {
-		R, S *big.Int
+	// 低 S 规范化（签名不可塑性，对齐比特币/以太坊/WebCrypto）：
+	// ECDSA 签名中 (r, s) 与 (r, N-s) 数学上等价，均能通过验签；
+	// 攻击者可将合法签名翻转为高 S 形态以规避签名归一/去重的黑名单
+	// （如复用已被记录的 (r, s) 对）。这里强制 s ≤ N/2（halfOrder），
+	// 输出唯一规范形态，并配合 Verify 拒绝高 S 签名。
+	//
+	// 注意：历史上由其他工具（如旧版 OpenSSL/OpenJDK 等未归一的实现）
+	// 产生的高 S 签名在本库 Verify 将被拒绝——对接存量签名数据时
+	// 需先做低 S 归一化或改用接受高 S 的实现。
+	n := s.prk.Curve.Params().N
+	halfOrder := new(big.Int).Rsh(new(big.Int).Set(n), 1)
+	if s_val.Cmp(halfOrder) > 0 {
+		s_val = new(big.Int).Sub(n, s_val)
 	}
-	sig := ecdsaSignature{R: r, S: s_val}
-	return asn1.Marshal(sig)
+
+	// 返回 ASN.1 DER 编码的签名（低 S 规范化后重编码）
+	return asn1.Marshal(ecdsaSignature{R: r, S: s_val})
 }
 
 func (s *ecdsa_algo) Verify(data, signature []byte) bool {
@@ -175,8 +222,26 @@ func (s *ecdsa_algo) Verify(data, signature []byte) bool {
 	h.Write(data)
 	hashed := h.Sum(nil)
 
+	// 低 S 规则（与 Sign 对称）：先解析 DER 提取 s，s > N/2 的高 S 签名
+	// 直接拒绝——与 Sign 只产出低 S 签名对应，保证签名形态唯一、
+	// 不可被翻转重放（防止攻击者将合法签名 (r, s) 翻转为 (r, N-s)
+	// 绕过基于签名值的黑名单/去重）。
+	//
+	// 注意：历史上由其他工具产生的高 S 签名在这里将被拒绝（false），
+	// 与低 S 规范化的目的对齐（见 Sign 注释）。
+	var parsed ecdsaSignature
+	if _, err := asn1.Unmarshal(signature, &parsed); err != nil || parsed.R == nil || parsed.S == nil {
+		return false
+	}
+	n := s.puk.Curve.Params().N
+	halfOrder := new(big.Int).Rsh(new(big.Int).Set(n), 1)
+	if parsed.S.Cmp(halfOrder) > 0 {
+		return false
+	}
+
 	// 使用 ecdsa.VerifyASN1 严格完整消费 DER 签名：
 	// 此前 asn1.Unmarshal 丢弃 rest，签名后追加垃圾字节仍会验签通过；
 	// VerifyASN1 要求签名恰好为一个 DER 编码的 ECDSA 签名（无多余字节）。
+	// 上面的低 S 检查仅提取 s，不修改签名，随后仍走完整 VerifyASN1。
 	return ecdsa.VerifyASN1(s.puk, hashed, signature)
 }

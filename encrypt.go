@@ -165,6 +165,11 @@ var (
 	ErrInvalidBase64Nonce        = errors.New("crypto: invalid base64 nonce")
 	ErrAuthenticationFailed      = errors.New("crypto: message authentication failed")
 	ErrInsecureAlgorithm         = errors.New("crypto: insecure algorithm/mode refused (DES/3DES/ECB); use WithInsecureAlgorithms() to override")
+	// ErrEmbedConflict EmbedIV/EmbedNonce 与显式 WithIV/WithNonce 同时使用时返回：
+	// 外部显式 IV/nonce 的语义是"密文不含前缀"，与"嵌入前缀"选项相互矛盾。
+	// 协议层默认即随机生成并嵌入（无 WithIV/WithNonce 时 EmbedIV/EmbedNonce 为
+	// 合法 no-op），显式传 IV/Nonce 时无需（也不应）再启用嵌入选项。
+	ErrEmbedConflict = errors.New("crypto: EmbedIV/EmbedNonce conflicts with explicit IV/nonce")
 )
 
 // WithKey 以原始密钥字节提供密钥（内部拷贝保存）。
@@ -316,8 +321,10 @@ func WithBase64Nonce(encoded string) Option {
 // 缺源返回 ErrKeyRequired，长度按算法严格校验。IV/nonce 默认随机生成并前置；
 // 也可通过 WithIV/WithNonce 外部提供（密文不含前缀，Decrypt 必须对称传入同一选项）。
 //
-// 无认证模式（ECB/CBC/CTR）密文可被任意篡改且解密无失败信号，仅限遗留兼容；
-// 推荐使用 GCM（认证加密，篡改返回 ErrAuthenticationFailed）。
+// 无认证模式（ECB/CBC/CFB/OFB/CTR）密文可被任意篡改且解密无失败信号，
+// 仅限遗留兼容；除非对接遗留系统，应使用 GCM（认证加密，篡改返回
+// ErrAuthenticationFailed）。解密来自不可信对端的 CBC 密文并向对端反馈
+// 解密成败将构成 padding oracle 攻击面，慎用。
 //
 // 本函数为一次性便捷入口：内部构造 Encryptor（NewEncryptor）并立即调用
 // Encrypt 后丢弃（使用即弃）；需要反复加解密同一密钥的调用方请复用 Encryptor。
@@ -333,6 +340,13 @@ func Encrypt(alg Algorithm, mode Mode, data []byte, opts ...Option) ([]byte, err
 // （同一 algorithm/mode、同一密钥源、同一 WithIV/WithNonce/WithAAD/WithPadding）。
 // GCM 认证失败统一返回 ErrAuthenticationFailed；CBC/ECB 填充或对齐失败
 // 返回 ErrInvalidPadding/对齐错误；CTR/CFB/OFB 无认证，不检测篡改。
+//
+// # 安全警告（无认证模式）
+//
+// CBC/CFB/OFB/CTR/ECB 模式不提供消息认证，密文可被篡改而不被发现；
+// 除非对接遗留系统，应使用 GCM（认证加密，篡改返回 ErrAuthenticationFailed）。
+// 解密来自不可信对端的 CBC 密文并向对端反馈解密成败将构成 padding oracle
+// 攻击面：填充错误与解密成功与否的差异可被逐字节恢复明文。
 //
 // 本函数为一次性便捷入口：内部构造 Encryptor（NewEncryptor）并立即调用
 // Decrypt 后丢弃；需要反复加解密同一密钥的调用方请复用 Encryptor。
@@ -400,7 +414,10 @@ func prepare(alg Algorithm, mode Mode, opts []Option) (Cipher, *Config, error) {
 		return nil, nil, ErrInvalidIVLength
 	}
 
-	c, err := NewCipher(alg.String(), key)
+	// 经注册表构造算法实例。不安全算法（DES/3DES）的闸门已在上方
+	// prepare 入口校验完成（cfg.AllowInsecure），此处把同一策略透传给
+	// 低层 NewCipher 的自身闸门，避免放行后又被低层拒绝。
+	c, err := NewCipher(alg.String(), key, allowInsecureOpt(cfg.AllowInsecure))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -423,9 +440,24 @@ func resolveKey(cfg *Config) ([]byte, error) {
 }
 
 // validateModeOpts 校验选项与模式的兼容性（基于单次应用后的 cfg）：
-// WithPadding 仅 ECB/CBC、WithAAD 与 WithNonce 仅 GCM、WithIV 不适用 ECB/GCM。
+//   - 嵌入式选项矛盾：EmbedIV 与显式 WithIV、EmbedNonce 与显式 WithNonce
+//     互为矛盾语义（见 ErrEmbedConflict）。单独传 EmbedIV()/EmbedNonce()
+//     （无 IV/Nonce）为合法 no-op：协议层默认即随机生成并嵌入前缀。
+//   - 嵌入式选项的模式错配：EmbedNonce 仅 GCM（其余模式复用
+//     ErrNonceNotSupported）；EmbedIV 不适用 ECB（无 IV）与 GCM（nonce 专属，
+//     复用 ErrIVNotSupported）。
+//   - 原有规则：WithPadding 仅 ECB/CBC、WithAAD 与 WithNonce 仅 GCM、
+//     WithIV 不适用 ECB/GCM。
 func validateModeOpts(mode Mode, cfg *Config) error {
 	switch {
+	case cfg.EmbedIV && cfg.IV != nil:
+		return ErrEmbedConflict
+	case cfg.EmbedNonce && cfg.Nonce != nil:
+		return ErrEmbedConflict
+	case cfg.EmbedNonce && mode != GCM:
+		return ErrNonceNotSupported
+	case cfg.EmbedIV && (mode == ECB || mode == GCM):
+		return ErrIVNotSupported
 	case cfg.Padding != nil && mode != ECB && mode != CBC:
 		return ErrPaddingNotSupported
 	case cfg.AAD != nil && mode != GCM:

@@ -140,6 +140,55 @@ func TestOptionModeIncompat(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// ==================== 审核修复：EmbedIV/EmbedNonce 矛盾组合（P3#21） ====================
+
+// TestEmbedOptionConflicts 嵌入式选项与显式 IV/nonce 的矛盾校验：
+//   - EmbedIV + WithIV、EmbedNonce + WithNonce → ErrEmbedConflict（×2）
+//   - EmbedNonce 配非 GCM 模式 → ErrNonceNotSupported（×2）
+//   - EmbedIV 配 ECB/GCM → ErrIVNotSupported（×2）
+//   - 单独 EmbedIV()/EmbedNonce()（无 IV/Nonce）为合法 no-op（×1）
+func TestEmbedOptionConflicts(t *testing.T) {
+	key := make([]byte, 16)
+
+	// 矛盾组合 ×2：嵌入选项与显式值语义冲突
+	_, err := crypto.Encrypt(crypto.AES128, crypto.CBC, []byte("x"), crypto.WithKey(key), crypto.EmbedIV(), crypto.WithIV(make([]byte, 16)))
+	assert.ErrorIs(t, err, crypto.ErrEmbedConflict, "EmbedIV+WithIV 应报 ErrEmbedConflict")
+
+	_, err = crypto.Encrypt(crypto.AES128, crypto.GCM, []byte("x"), crypto.WithKey(key), crypto.EmbedNonce(), crypto.WithNonce(make([]byte, 12)))
+	assert.ErrorIs(t, err, crypto.ErrEmbedConflict, "EmbedNonce+WithNonce 应报 ErrEmbedConflict")
+
+	// 模式错配 ×2：EmbedNonce 仅 GCM、EmbedIV 不适用 ECB（无 IV）
+	_, err = crypto.Encrypt(crypto.AES128, crypto.CBC, []byte("x"), crypto.WithKey(key), crypto.EmbedNonce())
+	assert.ErrorIs(t, err, crypto.ErrNonceNotSupported, "EmbedNonce×CBC 应报 ErrNonceNotSupported")
+
+	_, err = crypto.Encrypt(crypto.AES128, crypto.CFB, []byte("x"), crypto.WithKey(key), crypto.EmbedNonce())
+	assert.ErrorIs(t, err, crypto.ErrNonceNotSupported, "EmbedNonce×CFB 应报 ErrNonceNotSupported")
+
+	// EmbedIV 配 GCM（nonce 专属）与 ECB（无 IV）复用 ErrIVNotSupported
+	_, err = crypto.Encrypt(crypto.AES128, crypto.GCM, []byte("x"), crypto.WithKey(key), crypto.EmbedIV())
+	assert.ErrorIs(t, err, crypto.ErrIVNotSupported, "EmbedIV×GCM 应报 ErrIVNotSupported")
+
+	_, err = crypto.Encrypt(crypto.AES128, crypto.ECB, []byte("x"), crypto.WithKey(key), crypto.EmbedIV(), crypto.WithInsecureAlgorithms())
+	assert.ErrorIs(t, err, crypto.ErrIVNotSupported, "EmbedIV×ECB 应报 ErrIVNotSupported")
+
+	// 单独使用：无显式 IV/Nonce 时嵌入选项为合法 no-op
+	//（协议层默认即随机生成并前置，加密成功即证明放行）
+	for _, tc := range []struct {
+		mode  crypto.Mode
+		embed crypto.Option
+		name  string
+	}{
+		{crypto.CBC, crypto.EmbedIV(), "EmbedIV only × CBC"},
+		{crypto.GCM, crypto.EmbedNonce(), "EmbedNonce only × GCM"},
+	} {
+		opts := []crypto.Option{crypto.WithKey(key), tc.embed}
+		ct, err := crypto.Encrypt(crypto.AES128, tc.mode, []byte("x"), opts...)
+		require.NoError(t, err, "%s 应合法", tc.name)
+		_, err = crypto.Decrypt(crypto.AES128, tc.mode, ct, opts...)
+		require.NoError(t, err, "%s 解密应对称成功", tc.name)
+	}
+}
+
 // ==================== 密钥四源 ====================
 
 func TestKeySources(t *testing.T) {
@@ -391,7 +440,7 @@ func TestNilOption_Safe(t *testing.T) {
 	require.NoError(t, err)
 	_, err = c.NewCBC(iv, nil)
 	require.NoError(t, err)
-	_, err = c.NewECB(nil)
+	_, err = c.NewECB(nil, crypto.WithInsecureAlgorithms())
 	require.NoError(t, err)
 	_, err = c.NewCFB(iv, nil)
 	require.NoError(t, err)

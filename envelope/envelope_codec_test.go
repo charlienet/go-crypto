@@ -38,7 +38,8 @@ func (legacyECBCodec) Encrypt(algorithm rootcrypto.Algorithm, key []byte, plaint
 	if err != nil {
 		return nil, err
 	}
-	mode, err := c.NewECB()
+	// ECB 不安全：低层闸门默认拒绝，适配器演示遗留格式须显式放行
+	mode, err := c.NewECB(rootcrypto.WithInsecureAlgorithms())
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +59,7 @@ func (legacyECBCodec) Decrypt(key []byte, envelope []byte, opts ...rootcrypto.Op
 	if err != nil {
 		return nil, err
 	}
-	mode, err := c.NewECB()
+	mode, err := c.NewECB(rootcrypto.WithInsecureAlgorithms())
 	if err != nil {
 		return nil, err
 	}

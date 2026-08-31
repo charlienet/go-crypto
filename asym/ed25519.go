@@ -40,12 +40,20 @@ func newED25519(opts ...rootcrypto.AsymOption) (rootcrypto.Asymmetric, error) {
 		}
 		// 拷贝注入的切片：调用方后续修改原切片不应影响本实例持有的密钥
 		algo.prk = append([]byte(nil), edKey...)
+		// 回填公钥：ed25519 私钥为 64 字节（后 32 字节即公钥），
+		// 经 Public() 导出——私钥注入后同实例可直接 Verify（公钥能力自动派生）。
+		algo.puk = algo.prk.Public().(ed25519.PublicKey)
 	}
 
 	if cfg.PublicKeyObject != nil {
 		edKey, ok := cfg.PublicKeyObject.(ed25519.PublicKey)
 		if !ok {
 			return nil, errors.New("not an Ed25519 public key")
+		}
+		// 公钥长度必须恰为 ed25519.PublicKeySize（32），
+		// 否则标准库 ed25519.Verify 会 panic（防外部输入触发）。
+		if len(edKey) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("invalid Ed25519 public key length %d, want %d", len(edKey), ed25519.PublicKeySize)
 		}
 		// 拷贝注入的切片，避免与调用方共享底层数组
 		algo.puk = append([]byte(nil), edKey...)

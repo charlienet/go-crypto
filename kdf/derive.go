@@ -9,6 +9,10 @@ import (
 // 内部使用 Argon2id（默认参数），适合大多数密码派生场景。
 // 如需自定义参数或使用其他算法，请直接调用 Argon2id / PBKDF2 / HKDF。
 //
+// 注意：与 agreement.DeriveKey（密钥协商一步式派生）同名不同义——
+// 本函数为口令派生（Argon2id），agreement.DeriveKey 为协商共享密钥
+// 派生（HKDF），二者输出语义完全不同。
+//
 // 参数：
 //   - password：用户密码
 //   - salt：盐值（建议至少 16 字节随机值，每次派生唯一）
