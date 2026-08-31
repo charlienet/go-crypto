@@ -11,11 +11,11 @@ import (
 	"hash"
 	"strings"
 
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 	"github.com/emmansun/gmsm/sm3"
 )
 
-type HMacFunc func(key, msg []byte) bytesconv.BytesResult
+type HMacFunc func(key, msg []byte) bytex.Bytes
 
 var hmacFuncs = map[string]HMacFunc{
 	"HMACMD5":    Md5,
@@ -44,7 +44,7 @@ func New(fname string, key []byte) (*HMacComparer, error) {
 	}, nil
 }
 
-func (c *HMacComparer) Sign(msg []byte) (bytesconv.BytesResult, error) {
+func (c *HMacComparer) Sign(msg []byte) (bytex.Bytes, error) {
 	ret := c.hashFunc(c.key, msg)
 	return ret, nil
 }
@@ -75,7 +75,7 @@ func ByName(name string) (HMacFunc, error) {
 // 注意：HMAC 的安全性不依赖底层哈希的碰撞抗性（即使 MD5 已被碰撞破解，
 // HMAC-MD5 在标准假设下仍具伪随机性），但仅限兼容/非对抗场景，
 // 新代码优先使用 HMACSHA256 或 HMACSM3。
-func Md5(key, msg []byte) bytesconv.BytesResult { return sum(md5.New, key, msg) }
+func Md5(key, msg []byte) bytex.Bytes { return sum(md5.New, key, msg) }
 
 // Deprecated: HMAC-SHA1 虽然仍安全，但建议迁移到更现代的算法。
 // Sha1 计算 HMAC-SHA1 消息认证码。
@@ -83,19 +83,19 @@ func Md5(key, msg []byte) bytesconv.BytesResult { return sum(md5.New, key, msg) 
 // 注意：HMAC 的安全性不依赖底层哈希的碰撞抗性（即使 SHA-1 已被碰撞破解，
 // HMAC-SHA1 在标准假设下仍具伪随机性），但仅限兼容/非对抗场景，
 // 新代码优先使用 HMACSHA256 或 HMACSM3。
-func Sha1(key, msg []byte) bytesconv.BytesResult { return sum(sha1.New, key, msg) }
+func Sha1(key, msg []byte) bytex.Bytes { return sum(sha1.New, key, msg) }
 
-func Sha224(key, msg []byte) bytesconv.BytesResult { return sum(sha256.New224, key, msg) }
+func Sha224(key, msg []byte) bytex.Bytes { return sum(sha256.New224, key, msg) }
 
-func Sha256(key, msg []byte) bytesconv.BytesResult { return sum(sha256.New, key, msg) }
+func Sha256(key, msg []byte) bytex.Bytes { return sum(sha256.New, key, msg) }
 
-func Sha384(key, msg []byte) bytesconv.BytesResult { return sum(sha512.New384, key, msg) }
+func Sha384(key, msg []byte) bytex.Bytes { return sum(sha512.New384, key, msg) }
 
-func Sha512(key, msg []byte) bytesconv.BytesResult { return sum(sha512.New, key, msg) }
+func Sha512(key, msg []byte) bytex.Bytes { return sum(sha512.New, key, msg) }
 
-func Sm3(key, msg []byte) bytesconv.BytesResult { return sum(sm3.New, key, msg) }
+func Sm3(key, msg []byte) bytex.Bytes { return sum(sm3.New, key, msg) }
 
-func sum(f func() hash.Hash, key, msg []byte) bytesconv.BytesResult {
+func sum(f func() hash.Hash, key, msg []byte) bytex.Bytes {
 	h := hmac.New(f, key)
 
 	h.Write(msg)

@@ -65,8 +65,8 @@ func TestEncryptor_RoundTrip_MultiRound(t *testing.T) {
 			require.NoError(t, err)
 
 			// 同一实例连续多轮 Encrypt→Decrypt 还原（长度变化覆盖填充边界）
-			for i := 0; i < 5; i++ {
-				pt := []byte(fmt.Sprintf("round %d payload %d", i, i))
+			for i := range 5 {
+				pt := fmt.Appendf(nil, "round %d payload %d", i, i)
 				ct, err := e.Encrypt(pt)
 				require.NoError(t, err, "第 %d 轮 Encrypt", i)
 				got, err := e.Decrypt(ct)
@@ -88,7 +88,7 @@ func TestEncryptor_NonceIV_Unique(t *testing.T) {
 		e, err := crypto.NewEncryptor(crypto.AES128, crypto.GCM, crypto.WithKey(key))
 		require.NoError(t, err)
 		seen := make(map[string]bool)
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			ct, err := e.Encrypt(pt)
 			require.NoError(t, err)
 			prefix := string(ct[:12])
@@ -103,7 +103,7 @@ func TestEncryptor_NonceIV_Unique(t *testing.T) {
 			e, err := crypto.NewEncryptor(crypto.AES128, mode, crypto.WithKey(key))
 			require.NoError(t, err)
 			seen := make(map[string]bool)
-			for i := 0; i < 8; i++ {
+			for i := range 8 {
 				ct, err := e.Encrypt(pt)
 				require.NoError(t, err)
 				prefix := string(ct[:16])
@@ -301,18 +301,16 @@ func TestEncryptor_Concurrent(t *testing.T) {
 			pt := []byte("concurrent Encryptor race check payload")
 
 			var wg sync.WaitGroup
-			for i := 0; i < 8; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					for j := 0; j < 100; j++ {
+			for range 8 {
+				wg.Go(func() {
+					for range 100 {
 						ct, err := e.Encrypt(pt)
 						assert.NoError(t, err)
 						got, err := e.Decrypt(ct)
 						assert.NoError(t, err)
 						assert.Equal(t, pt, got)
 					}
-				}()
+				})
 			}
 			wg.Wait()
 		})

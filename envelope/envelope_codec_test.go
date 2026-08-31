@@ -139,7 +139,7 @@ func TestRegisterEnvelopeCodec_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// 并发注册不同名
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -152,7 +152,7 @@ func TestRegisterEnvelopeCodec_Concurrent(t *testing.T) {
 
 	// 并发查询：全部应命中
 	var qwg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		qwg.Add(1)
 		go func(i int) {
 			defer qwg.Done()
@@ -174,12 +174,10 @@ func TestRegisterEnvelopeCodec_ConcurrentSameName(t *testing.T) {
 	name := fmt.Sprintf("test-race-%d", time.Now().UnixNano())
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			errs <- RegisterEnvelopeCodec(nameOnlyCodec{name: name})
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)
@@ -301,10 +299,8 @@ func TestExampleCodec_ConcurrentRoundTrip(t *testing.T) {
 	plaintext := []byte("concurrent legacy ecb")
 
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			envelope, err := codec.Encrypt(rootcrypto.AES128, key, plaintext)
 			if err != nil {
 				t.Errorf("Encrypt failed: %v", err)
@@ -318,7 +314,7 @@ func TestExampleCodec_ConcurrentRoundTrip(t *testing.T) {
 			if !bytes.Equal(plaintext, decrypted) {
 				t.Errorf("round trip mismatch")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -334,8 +330,6 @@ func TestDecryptWith_UnknownCodec(t *testing.T) {
 	_, err := DecryptWith("no-such-codec", []byte("0123456789abcdef"), []byte("test"))
 	assert.ErrorIs(t, err, ErrUnknownEnvelopeCodec)
 }
-
-
 
 func TestDecryptWith_GCX1BadMagic(t *testing.T) {
 	key := []byte("0123456789abcdef")

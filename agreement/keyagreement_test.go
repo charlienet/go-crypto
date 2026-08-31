@@ -91,7 +91,7 @@ func TestSM2_KeyAgreement(t *testing.T) {
 func TestKeyAgreement_Concurrent(t *testing.T) {
 	done := make(chan bool, 10)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			ka, _ := crypto.NewKeyAgreement(crypto.X25519)
 			kp, err := ka.GenerateKey()
@@ -101,7 +101,7 @@ func TestKeyAgreement_Concurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }

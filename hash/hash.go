@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/cespare/xxhash/v2"
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 	"github.com/charlienet/go-crypto"
 	"github.com/emmansun/gmsm/sm3"
 	"github.com/spaolacci/murmur3"
@@ -20,7 +20,7 @@ import (
 
 var _ crypto.Signer = &HashComparer{}
 
-type HashFunc func([]byte) bytesconv.BytesResult
+type HashFunc func([]byte) bytex.Bytes
 
 var hashFuncs = map[string]HashFunc{
 	"MD5":    Md5,
@@ -47,7 +47,7 @@ func New(fname string) (*HashComparer, error) {
 	}, nil
 }
 
-func (c *HashComparer) Sign(msg []byte) (bytesconv.BytesResult, error) {
+func (c *HashComparer) Sign(msg []byte) (bytex.Bytes, error) {
 	ret := c.hashFunc(msg)
 	return ret.Bytes(), nil
 }
@@ -77,24 +77,24 @@ func ByName(name string) (HashFunc, error) {
 //
 // 警告：MD5 已被破解（存在碰撞攻击），仅限兼容/非安全用途
 // （如校验和、去重），禁止用于密码存储、签名、MAC 等安全场景。
-func Md5(msg []byte) bytesconv.BytesResult { return sum(md5.New, msg) }
+func Md5(msg []byte) bytex.Bytes { return sum(md5.New, msg) }
 
 // Deprecated: SHA1 已不安全，不应用于安全场景。仅用于兼容性。
 // Sha1 计算消息的 SHA-1 摘要。
 //
 // 警告：SHA-1 已被破解（存在碰撞攻击），仅限兼容/非安全用途
 // （如校验和、去重），禁止用于密码存储、签名、MAC 等安全场景。
-func Sha1(msg []byte) bytesconv.BytesResult { return sum(sha1.New, msg) }
+func Sha1(msg []byte) bytex.Bytes { return sum(sha1.New, msg) }
 
-func Sha224(msg []byte) bytesconv.BytesResult { return sum(sha256.New224, msg) }
+func Sha224(msg []byte) bytex.Bytes { return sum(sha256.New224, msg) }
 
-func Sha256(msg []byte) bytesconv.BytesResult { return sum(sha256.New, msg) }
+func Sha256(msg []byte) bytex.Bytes { return sum(sha256.New, msg) }
 
-func Sha384(msg []byte) bytesconv.BytesResult { return sum(sha512.New384, msg) }
+func Sha384(msg []byte) bytex.Bytes { return sum(sha512.New384, msg) }
 
-func Sha512(msg []byte) bytesconv.BytesResult { return sum(sha512.New, msg) }
+func Sha512(msg []byte) bytex.Bytes { return sum(sha512.New, msg) }
 
-func Sm3(msg []byte) bytesconv.BytesResult { return sum(sm3.New, msg) }
+func Sm3(msg []byte) bytex.Bytes { return sum(sm3.New, msg) }
 
 // Murmur3 计算消息的 Murmur3 64 位哈希。
 //
@@ -146,7 +146,7 @@ func Fnv64(msg []byte) uint64 {
 
 
 
-func sum(f func() hash.Hash, msg []byte) bytesconv.BytesResult {
+func sum(f func() hash.Hash, msg []byte) bytex.Bytes {
 	h := f()
 
 	_, _ = h.Write(msg)

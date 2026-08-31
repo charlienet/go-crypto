@@ -8,13 +8,13 @@ The package is designed to work in conjunction with the hash package, providing 
 using the same underlying hash algorithms.
 
 Exported Functions:
-  - Md5(key, msg []byte) BytesResult: Calculates HMAC-MD5 authentication code
-  - Sha1(key, msg []byte) BytesResult: Calculates HMAC-SHA1 authentication code
-  - Sha224(key, msg []byte) BytesResult: Calculates HMAC-SHA224 authentication code
-  - Sha256(key, msg []byte) BytesResult: Calculates HMAC-SHA256 authentication code
-  - Sha384(key, msg []byte) BytesResult: Calculates HMAC-SHA384 authentication code
-  - Sha512(key, msg []byte) BytesResult: Calculates HMAC-SHA512 authentication code
-  - Sm3(key, msg []byte) BytesResult: Calculates HMAC-SM3 authentication code (Chinese national standard)
+  - Md5(key, msg []byte) Bytes: Calculates HMAC-MD5 authentication code
+  - Sha1(key, msg []byte) Bytes: Calculates HMAC-SHA1 authentication code
+  - Sha224(key, msg []byte) Bytes: Calculates HMAC-SHA224 authentication code
+  - Sha256(key, msg []byte) Bytes: Calculates HMAC-SHA256 authentication code
+  - Sha384(key, msg []byte) Bytes: Calculates HMAC-SHA384 authentication code
+  - Sha512(key, msg []byte) Bytes: Calculates HMAC-SHA512 authentication code
+  - Sm3(key, msg []byte) Bytes: Calculates HMAC-SM3 authentication code (Chinese national standard)
   - ByName(string) (HMacFunc, error): Gets HMAC function by name
   - New(string, []byte) (*HMacComparer, error): Creates a new HMAC comparer instance with the specified algorithm and key
 

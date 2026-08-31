@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 	"github.com/charlienet/go-crypto"
 	"github.com/emmansun/gmsm/sm4"
 )
@@ -205,7 +205,7 @@ func (a *algo_gcm) NonceSize() int {
 	return a.gcm.NonceSize()
 }
 
-func (a *algo_gcm) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
+func (a *algo_gcm) Encrypt(plainText []byte) (bytex.Bytes, error) {
 	nonce := make([]byte, a.gcm.NonceSize())
 	if a.randomNonce || len(a.nonce) == 0 {
 		if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
@@ -221,7 +221,7 @@ func (a *algo_gcm) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
 	return a.gcm.Seal(nil, nonce, plainText, a.aad), nil
 }
 
-func (a *algo_gcm) Decrypt(ciphertext []byte) (bytesconv.BytesResult, error) {
+func (a *algo_gcm) Decrypt(ciphertext []byte) (bytex.Bytes, error) {
 	if a.embednonce {
 		ns := a.gcm.NonceSize()
 		if len(ciphertext) < ns {
@@ -291,7 +291,7 @@ type algo_cbc struct {
 	padding  Padding
 }
 
-func (a *algo_cbc) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
+func (a *algo_cbc) Encrypt(plainText []byte) (bytex.Bytes, error) {
 	paddedText, err := a.padding.Padding(a.block.BlockSize(), plainText)
 	if err != nil {
 		return nil, err
@@ -320,7 +320,7 @@ func (a *algo_cbc) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
 	return cipherText, nil
 }
 
-func (a *algo_cbc) Decrypt(ciphertext []byte) (bytesconv.BytesResult, error) {
+func (a *algo_cbc) Decrypt(ciphertext []byte) (bytex.Bytes, error) {
 	if a.embediv {
 		bs := a.block.BlockSize()
 		if len(ciphertext) < bs {
@@ -429,7 +429,7 @@ type algo_cfb struct {
 	randomIV bool
 }
 
-func (a *algo_cfb) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
+func (a *algo_cfb) Encrypt(plainText []byte) (bytex.Bytes, error) {
 	iv := a.iv
 	if a.randomIV {
 		iv = make([]byte, a.block.BlockSize())
@@ -453,7 +453,7 @@ func (a *algo_cfb) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
 	return cipherText, nil
 }
 
-func (a *algo_cfb) Decrypt(cipherText []byte) (bytesconv.BytesResult, error) {
+func (a *algo_cfb) Decrypt(cipherText []byte) (bytex.Bytes, error) {
 	if a.embediv {
 		bs := a.block.BlockSize()
 		if len(cipherText) < bs {
@@ -521,7 +521,7 @@ type algo_ofb struct {
 	randomIV bool
 }
 
-func (a *algo_ofb) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
+func (a *algo_ofb) Encrypt(plainText []byte) (bytex.Bytes, error) {
 	iv := a.iv
 	if a.randomIV {
 		iv = make([]byte, a.block.BlockSize())
@@ -545,7 +545,7 @@ func (a *algo_ofb) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
 	return cipherText, nil
 }
 
-func (a *algo_ofb) Decrypt(cipherText []byte) (bytesconv.BytesResult, error) {
+func (a *algo_ofb) Decrypt(cipherText []byte) (bytex.Bytes, error) {
 	if a.embediv {
 		bs := a.block.BlockSize()
 		if len(cipherText) < bs {
@@ -570,7 +570,7 @@ type algo_ecb struct {
 	padding Padding
 }
 
-func (a *algo_ecb) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
+func (a *algo_ecb) Encrypt(plainText []byte) (bytex.Bytes, error) {
 	paddedText, err := a.padding.Padding(a.block.BlockSize(), plainText)
 	if err != nil {
 		return nil, err
@@ -584,7 +584,7 @@ func (a *algo_ecb) Encrypt(plainText []byte) (bytesconv.BytesResult, error) {
 	return dst, nil
 }
 
-func (a *algo_ecb) Decrypt(cipherText []byte) (bytesconv.BytesResult, error) {
+func (a *algo_ecb) Decrypt(cipherText []byte) (bytex.Bytes, error) {
 	bs := a.block.BlockSize()
 	// 显式校验对齐，避免切片越界 panic（远程 DoS）。
 	// ECB Encrypt 无需同类防护：其输入均先经 padding.Padding，

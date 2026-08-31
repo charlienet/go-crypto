@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/charlienet/go-utils/bytesconv"
 	"github.com/charlienet/go-crypto/common"
+	"github.com/charlienet/go-utils/bytex"
 )
 
 // ErrCiphertextNotAligned 密文长度不是块大小整数倍时返回的统一错误。
@@ -60,7 +60,7 @@ func (p PKCS7) UnPadding(blockSize int, src []byte) ([]byte, error) {
 	// 常量时间校验：累计异或全部填充字节后统一判断，
 	// 避免逐字节早退导致填充错误位置成为可观察的时序差异（padding oracle 判据）。
 	bad := 0
-	for i := 0; i < unpadding; i++ {
+	for i := range unpadding {
 		bad |= int(pad[i]) ^ unpadding
 	}
 	if bad != 0 {
@@ -142,8 +142,8 @@ type Cipher interface {
 // 同一实例可安全并发调用）；StreamCipher（CTR）持有流状态，其
 // XORKeyStream/Stream 非并发安全，并发场景请各自构造独立实例。
 type CipherMode interface {
-	Encrypt(plainText []byte) (bytesconv.BytesResult, error)
-	Decrypt(cipherText []byte) (bytesconv.BytesResult, error)
+	Encrypt(plainText []byte) (bytex.Bytes, error)
+	Decrypt(cipherText []byte) (bytex.Bytes, error)
 }
 
 // StreamCipher 流式加密接口。

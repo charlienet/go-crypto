@@ -269,7 +269,7 @@ func TestKeyPair_Concurrent_MarshalPublicKey(t *testing.T) {
 	done := make(chan bool, 20)
 	formats := []KeyFormat{KeyFormatBase64, KeyFormatPEM, KeyFormatHex, KeyFormatRaw}
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		go func(idx int) {
 			format := formats[idx%len(formats)]
 			data, err := MarshalPublicKey(kp.PublicKey, format)
@@ -279,7 +279,7 @@ func TestKeyPair_Concurrent_MarshalPublicKey(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		<-done
 	}
 }
@@ -290,7 +290,7 @@ func TestKeyPair_Concurrent_MarshalPrivateKey(t *testing.T) {
 	done := make(chan bool, 20)
 	formats := []KeyFormat{KeyFormatBase64, KeyFormatPEM, KeyFormatHex, KeyFormatRaw}
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		go func(idx int) {
 			format := formats[idx%len(formats)]
 			data, err := MarshalPrivateKey(kp.PrivateKey, format)
@@ -300,7 +300,7 @@ func TestKeyPair_Concurrent_MarshalPrivateKey(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		<-done
 	}
 }
@@ -309,7 +309,7 @@ func TestGenerateKey_Concurrent(t *testing.T) {
 	done := make(chan bool, 20)
 	algorithms := []rootcrypto.AsymmetricAlgorithm{rootcrypto.RSA, rootcrypto.SM2, rootcrypto.ECDSA, rootcrypto.ED25519}
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		go func(idx int) {
 			algo := algorithms[idx%len(algorithms)]
 			kp, err := GenerateKeyPair(algo)
@@ -321,7 +321,7 @@ func TestGenerateKey_Concurrent(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		<-done
 	}
 }
@@ -342,7 +342,7 @@ func TestAsymmetric_Concurrent_SignVerify(t *testing.T) {
 		done := make(chan bool, 10)
 		data := []byte("concurrent sign verify test")
 
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			go func() {
 				sig, err := signer.Sign(data)
 				assert.NoError(t, err)
@@ -351,7 +351,7 @@ func TestAsymmetric_Concurrent_SignVerify(t *testing.T) {
 			}()
 		}
 
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			<-done
 		}
 	}
@@ -375,7 +375,7 @@ func TestKeyPair_Race_MarshalUnmarshal(t *testing.T) {
 	done := make(chan bool, 20)
 
 	// 并发 Marshal：共享只读实例（读路径应安全）
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			_, _ = MarshalPublicKey(kp.PublicKey, KeyFormatPEM)
 			_, _ = MarshalPrivateKey(kp.PrivateKey, KeyFormatPEM)
@@ -384,14 +384,14 @@ func TestKeyPair_Race_MarshalUnmarshal(t *testing.T) {
 	}
 
 	// 并发 Unmarshal：各 goroutine 操作独立 KeyPair 实例（写路径互不干扰）
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(idx int) {
 			_, _ = ParsePrivateKeyPair(datasets[idx%len(datasets)], KeyFormatPEM)
 			done <- true
 		}(i)
 	}
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		<-done
 	}
 }
@@ -565,10 +565,7 @@ func TestKeyPair_UnmarshalPrivateKey_PasswordOnlyPEM(t *testing.T) {
 func buildPBES2SampleDER(t *testing.T, hashNew func() hash.Hash, prfOID asn1.ObjectIdentifier, password string, plainDER, salt, iv []byte, iter, keyLen int) []byte {
 	t.Helper()
 
-	derivedIter := iter
-	if derivedIter > 1000 {
-		derivedIter = 1000
-	}
+	derivedIter := min(iter, 1000)
 	derivedKeyLen := keyLen
 	if derivedKeyLen <= 0 || derivedKeyLen > 64 {
 		derivedKeyLen = 32

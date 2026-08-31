@@ -4,7 +4,7 @@ import (
 	"crypto"
 	"fmt"
 
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 )
 
 // KeyPair 已迁移到 keypair.go
@@ -17,8 +17,8 @@ type Asymmetric interface {
 	WithPublicKey(publicKey string) error
 	ExportPublicKey() (string, error)
 	Name() string
-	Encrypt(msg []byte) (bytesconv.BytesResult, error)
-	Decrypt(ciphertext []byte) (bytesconv.BytesResult, error)
+	Encrypt(msg []byte) (bytex.Bytes, error)
+	Decrypt(ciphertext []byte) (bytex.Bytes, error)
 	Signer
 }
 
@@ -33,7 +33,7 @@ type Asymmetric interface {
 // 使用本接口的调用方不要将两者混用（例如把消息摘要直接传给本接口的 Sign，
 // 或把 crypto.Signer 当作本接口使用）。
 type Signer interface {
-	Sign(msg []byte) (bytesconv.BytesResult, error)
+	Sign(msg []byte) (bytex.Bytes, error)
 	Verify(msg, sign []byte) bool
 }
 

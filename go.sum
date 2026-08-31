@@ -1,7 +1,7 @@
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
-github.com/charlienet/go-utils v0.1.0 h1:+Zez1JGiNZ054zYiu109spjF5qkaA2UaU8ZvdRMhKcg=
-github.com/charlienet/go-utils v0.1.0/go.mod h1:zEQk2rDbIsEfssH/WeAybC4MbuYXgkHQRwQVDBBhaDQ=
+github.com/charlienet/go-utils v0.2.2 h1:25YoIxHsdXgdibnR7AqQwOt+rgCTWWnfHHeyN9dtBmY=
+github.com/charlienet/go-utils v0.2.2/go.mod h1:UaxSZPWVNNGdrEJ9F8qQwhx5FeJfa9OV4coS+JC9ej8=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/emmansun/gmsm v0.44.1 h1:zDTkdtLWFG0vCbhPV+k9pte14tix/eK71At9Iai9fP4=

@@ -71,7 +71,7 @@ func RegisterEnvelopeCodec(codec EnvelopeCodec) error {
 	}
 	// 类型化 nil 指针：codec == nil 为 false，但调用其 Name() 会 panic，
 	// 需通过反射显式识别并拒绝。
-	if v := reflect.ValueOf(codec); v.Kind() == reflect.Ptr && v.IsNil() {
+	if v := reflect.ValueOf(codec); v.Kind() == reflect.Pointer && v.IsNil() {
 		return ErrInvalidEnvelopeCodec
 	}
 	name := codec.Name()

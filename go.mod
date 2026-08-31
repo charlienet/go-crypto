@@ -1,10 +1,10 @@
 module github.com/charlienet/go-crypto
 
-go 1.26.0
+go 1.25.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/charlienet/go-utils v0.1.0
+	github.com/charlienet/go-utils v0.2.2
 	github.com/emmansun/gmsm v0.44.1
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.9.0

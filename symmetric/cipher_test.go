@@ -440,7 +440,7 @@ func TestSymmetric_Concurrent(t *testing.T) {
 
 	// 并发加密解密
 	done := make(chan bool, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			encrypted, err := gcm.Encrypt(plaintext)
 			assert.NoError(t, err)
@@ -451,7 +451,7 @@ func TestSymmetric_Concurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }
@@ -1131,7 +1131,7 @@ func TestSymmetric_CFB_Concurrent(t *testing.T) {
 	assert.NoError(t, err)
 
 	done := make(chan bool, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			cfb, err := c.NewCFB(iv)
 			assert.NoError(t, err)
@@ -1144,7 +1144,7 @@ func TestSymmetric_CFB_Concurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }
@@ -1160,7 +1160,7 @@ func TestSymmetric_OFB_Concurrent(t *testing.T) {
 	assert.NoError(t, err)
 
 	done := make(chan bool, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			ofb, err := c.NewOFB(iv)
 			assert.NoError(t, err)
@@ -1173,7 +1173,7 @@ func TestSymmetric_OFB_Concurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }

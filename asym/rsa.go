@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 	rootcrypto "github.com/charlienet/go-crypto"
 )
 
@@ -161,7 +161,7 @@ func (s *rsa_algo) ExportPublicKey() (string, error) {
 
 // OAEP 加密标签：空标签（无上下文绑定）。
 // 使用函数内字面量 []byte{} 而非包级可变变量，避免包级状态被同包代码篡改。
-func (r *rsa_algo) Encrypt(msg []byte) (bytesconv.BytesResult, error) {
+func (r *rsa_algo) Encrypt(msg []byte) (bytex.Bytes, error) {
 	if r.puk == nil {
 		return nil, errors.New("RSA public key not set")
 	}
@@ -170,7 +170,7 @@ func (r *rsa_algo) Encrypt(msg []byte) (bytesconv.BytesResult, error) {
 	return cipher, err
 }
 
-func (r *rsa_algo) Decrypt(msg []byte) (bytesconv.BytesResult, error) {
+func (r *rsa_algo) Decrypt(msg []byte) (bytex.Bytes, error) {
 	if r.prk == nil {
 		return nil, errors.New("RSA private key not set")
 	}
@@ -185,7 +185,7 @@ func (r *rsa_algo) Decrypt(msg []byte) (bytesconv.BytesResult, error) {
 	return plain, err
 }
 
-func (r *rsa_algo) Sign(data []byte) (bytesconv.BytesResult, error) {
+func (r *rsa_algo) Sign(data []byte) (bytex.Bytes, error) {
 	if r.prk == nil {
 		return nil, errors.New("RSA private key not set")
 	}

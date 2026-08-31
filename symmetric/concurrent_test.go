@@ -20,7 +20,7 @@ func TestSymmetric_CFB_OFB_Concurrent(t *testing.T) {
 	done := make(chan bool, 20)
 
 	// CFB 并发
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			cfb, _ := c.NewCFB(iv)
 			plaintext := []byte("concurrent CFB test data")
@@ -34,7 +34,7 @@ func TestSymmetric_CFB_OFB_Concurrent(t *testing.T) {
 	}
 
 	// OFB 并发
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			ofb, _ := c.NewOFB(iv)
 			plaintext := []byte("concurrent OFB test data")
@@ -47,7 +47,7 @@ func TestSymmetric_CFB_OFB_Concurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		<-done
 	}
 }

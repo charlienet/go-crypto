@@ -218,8 +218,6 @@ func TestGCX1_Tamper_NonceLen(t *testing.T) {
 	assert.ErrorIs(t, err, errGcx1NonceLenMismatch)
 }
 
-
-
 // ==================== EncryptWithAAD DES 拒绝 ====================
 
 func TestGCX1_EncryptWithAAD_DES_Rejected(t *testing.T) {
@@ -354,8 +352,6 @@ func TestGCX1_AAD_EncryptWithout_DecryptWith(t *testing.T) {
 
 // ==================== 未知算法拒绝 ====================
 
-
-
 // ==================== DES/3DES 拒绝 ====================
 
 func TestGCX1_DES_Rejected(t *testing.T) {
@@ -406,8 +402,6 @@ func TestGCX1_TooShort(t *testing.T) {
 	assert.ErrorIs(t, err, errGcx1TooShort)
 }
 
-
-
 // ==================== 并发测试 ====================
 
 func TestGCX1_Concurrent(t *testing.T) {
@@ -417,7 +411,7 @@ func TestGCX1_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 20)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(2)
 
 		// 并发加密
@@ -448,12 +442,10 @@ func TestGCX1_Concurrent_RoundTrip(t *testing.T) {
 	plaintext := []byte("round trip concurrent")
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 
-	envelope, err := Encrypt(rootcrypto.AES128, key, plaintext)
+			envelope, err := Encrypt(rootcrypto.AES128, key, plaintext)
 			if err != nil {
 				t.Errorf("Encrypt failed: %v", err)
 				return
@@ -467,7 +459,7 @@ func TestGCX1_Concurrent_RoundTrip(t *testing.T) {
 			if !bytes.Equal(plaintext, decrypted) {
 				t.Errorf("round trip mismatch: got %s, want %s", decrypted, plaintext)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

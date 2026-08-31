@@ -4,17 +4,17 @@ import "fmt"
 
 // 算法常量，用于高层 API 的 algorithm 参数。
 const (
-	AlgorithmSM4    = "SM4"
-	AlgorithmAES128 = "AES-128"
-	AlgorithmAES192 = "AES-192"
-	AlgorithmAES256 = "AES-256"
-	AlgorithmDES    = "DES"
-	Algorithm3DES   = "3DES"
-	AlgorithmSM2    = "SM2"
-	AlgorithmRSA    = "RSA"
-	AlgorithmECDH   = "ECDH"
-	AlgorithmX25519 = "X25519"
-	AlgorithmECDSA  = "ECDSA"
+	AlgorithmSM4     = "SM4"
+	AlgorithmAES128  = "AES-128"
+	AlgorithmAES192  = "AES-192"
+	AlgorithmAES256  = "AES-256"
+	AlgorithmDES     = "DES"
+	Algorithm3DES    = "3DES"
+	AlgorithmSM2     = "SM2"
+	AlgorithmRSA     = "RSA"
+	AlgorithmECDH    = "ECDH"
+	AlgorithmX25519  = "X25519"
+	AlgorithmECDSA   = "ECDSA"
 	AlgorithmED25519 = "ED25519"
 )
 
@@ -81,7 +81,7 @@ func toUpperASCII(s string) string {
 func compactName(s string) string {
 	j := 0
 	b := []byte(s)
-	for i := 0; i < len(b); i++ {
+	for i := range b {
 		if b[i] != '-' {
 			b[j] = b[i]
 			j++

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 	"github.com/charlienet/go-crypto"
 
 	_ "github.com/charlienet/go-crypto/agreement"
@@ -28,13 +28,13 @@ func (s *stubAsymmetric) WithPrivateKey(string) error          { return nil }
 func (s *stubAsymmetric) WithPublicKey(string) error           { return nil }
 func (s *stubAsymmetric) ExportPublicKey() (string, error)     { return "", nil }
 func (s *stubAsymmetric) Name() string                         { return "stub-asym" }
-func (s *stubAsymmetric) Encrypt(msg []byte) (bytesconv.BytesResult, error) {
+func (s *stubAsymmetric) Encrypt(msg []byte) (bytex.Bytes, error) {
 	return nil, nil
 }
-func (s *stubAsymmetric) Decrypt(ciphertext []byte) (bytesconv.BytesResult, error) {
+func (s *stubAsymmetric) Decrypt(ciphertext []byte) (bytex.Bytes, error) {
 	return nil, nil
 }
-func (s *stubAsymmetric) Sign(msg []byte) (bytesconv.BytesResult, error) {
+func (s *stubAsymmetric) Sign(msg []byte) (bytex.Bytes, error) {
 	return nil, nil
 }
 func (s *stubAsymmetric) Verify(msg, sign []byte) bool { return true }

@@ -305,7 +305,7 @@ func extractPublicKey(key crypto.PrivateKey) crypto.PublicKey {
 }
 
 // detectAlgorithm 检测密钥对象的算法名（NormalizeAlgorithm 规范形式）。
-func detectAlgorithm(key interface{}) string {
+func detectAlgorithm(key any) string {
 	switch k := key.(type) {
 	case *rsa.PrivateKey, *rsa.PublicKey:
 		return "RSA"

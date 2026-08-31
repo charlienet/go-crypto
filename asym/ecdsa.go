@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 	rootcrypto "github.com/charlienet/go-crypto"
 )
 
@@ -124,15 +124,15 @@ func (s *ecdsa_algo) ExportPublicKey() (string, error) {
 	return base64.StdEncoding.EncodeToString(der), nil
 }
 
-func (s *ecdsa_algo) Encrypt(msg []byte) (bytesconv.BytesResult, error) {
+func (s *ecdsa_algo) Encrypt(msg []byte) (bytex.Bytes, error) {
 	return nil, errors.New("ECDSA does not support encryption")
 }
 
-func (s *ecdsa_algo) Decrypt(ciphertext []byte) (bytesconv.BytesResult, error) {
+func (s *ecdsa_algo) Decrypt(ciphertext []byte) (bytex.Bytes, error) {
 	return nil, errors.New("ECDSA does not support decryption")
 }
 
-func (s *ecdsa_algo) Sign(data []byte) (bytesconv.BytesResult, error) {
+func (s *ecdsa_algo) Sign(data []byte) (bytex.Bytes, error) {
 	if s.prk == nil {
 		return nil, errors.New("ECDSA private key not set")
 	}

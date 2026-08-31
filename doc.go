@@ -139,8 +139,8 @@
 //
 // # 已知陷阱
 //
-//   - bytesconv.BytesResult.String() 返回 Hex 编码字符串，而非原文。
-//     如需原文，请使用 []byte 强制转换或 BytesResult.Open() 读取。
+//   - bytex.Bytes.String() 返回 Hex 编码字符串，而非原文。
+//     如需原文，请使用 []byte 强制转换或 bytex.Bytes.Open() 读取。
 //   - DES/3DES 块大小为 8 字节，无法使用 GCM 认证加密。
 //   - NormalizeAlgorithm 将泛名 "AES" 归一为 "AES-128"：低层 NewCipher
 //     支持 16/24/32 字节密钥（按密钥长度确定实际算法），但泛名传入高层

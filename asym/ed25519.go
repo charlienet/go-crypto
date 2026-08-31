@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 	rootcrypto "github.com/charlienet/go-crypto"
 )
 
@@ -96,15 +96,15 @@ func (s *ed25519_algo) ExportPublicKey() (string, error) {
 	return base64.StdEncoding.EncodeToString(der), nil
 }
 
-func (s *ed25519_algo) Encrypt(msg []byte) (bytesconv.BytesResult, error) {
+func (s *ed25519_algo) Encrypt(msg []byte) (bytex.Bytes, error) {
 	return nil, errors.New("Ed25519 does not support encryption")
 }
 
-func (s *ed25519_algo) Decrypt(ciphertext []byte) (bytesconv.BytesResult, error) {
+func (s *ed25519_algo) Decrypt(ciphertext []byte) (bytex.Bytes, error) {
 	return nil, errors.New("Ed25519 does not support decryption")
 }
 
-func (s *ed25519_algo) Sign(data []byte) (bytesconv.BytesResult, error) {
+func (s *ed25519_algo) Sign(data []byte) (bytex.Bytes, error) {
 	if s.prk == nil {
 		return nil, errors.New("Ed25519 private key not set")
 	}

@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 	rootcrypto "github.com/charlienet/go-crypto"
 	"github.com/emmansun/gmsm/sm2"
 	"github.com/emmansun/gmsm/smx509"
@@ -160,7 +160,7 @@ func (s *sm2_algo) ExportPublicKey() (string, error) {
 // 注意：gmsm 底层 Encrypt 对空明文（len(msg)==0）返回 (nil, nil)——
 // 即不报错、也不产出任何密文。调用方若需拒绝空明文，应自行前置校验；
 // 若按"空密文"处理，需自行区分 nil 密文与正常密文。
-func (s *sm2_algo) Encrypt(msg []byte) (bytesconv.BytesResult, error) {
+func (s *sm2_algo) Encrypt(msg []byte) (bytex.Bytes, error) {
 	if s.puk == nil {
 		return nil, errors.New("SM2 public key not set")
 	}
@@ -168,7 +168,7 @@ func (s *sm2_algo) Encrypt(msg []byte) (bytesconv.BytesResult, error) {
 	return sm2.EncryptASN1(rand.Reader, s.puk, msg)
 }
 
-func (s *sm2_algo) Decrypt(ciphertext []byte) (bytesconv.BytesResult, error) {
+func (s *sm2_algo) Decrypt(ciphertext []byte) (bytex.Bytes, error) {
 	if s.prk == nil {
 		return nil, errors.New("SM2 private key not set")
 	}
@@ -176,7 +176,7 @@ func (s *sm2_algo) Decrypt(ciphertext []byte) (bytesconv.BytesResult, error) {
 	return s.prk.Decrypt(rand.Reader, ciphertext, nil)
 }
 
-func (s *sm2_algo) Sign(msg []byte) (bytesconv.BytesResult, error) {
+func (s *sm2_algo) Sign(msg []byte) (bytex.Bytes, error) {
 	if s.prk == nil {
 		return nil, errors.New("SM2 private key not set")
 	}

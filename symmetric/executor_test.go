@@ -254,7 +254,7 @@ func TestEncryptDecrypt_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(m crypto.Mode) {
 			defer wg.Done()
-			for i := 0; i < 50; i++ {
+			for range 50 {
 				opts := []crypto.Option{crypto.WithKey(key)}
 				if m == crypto.ECB {
 					opts = append(opts, crypto.WithInsecureAlgorithms())

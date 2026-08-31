@@ -112,7 +112,7 @@ func RegisterModeExecutor(mode Mode, ex ModeExecutor) error {
 		return errNilEngine
 	}
 	// 类型化 nil 指针：复用 envelope_codec.go 的反射校验模式
-	if v := reflect.ValueOf(ex); v.Kind() == reflect.Ptr && v.IsNil() {
+	if v := reflect.ValueOf(ex); v.Kind() == reflect.Pointer && v.IsNil() {
 		return errNilEngine
 	}
 	modeExecutors.mu.Lock()

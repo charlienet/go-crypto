@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/charlienet/go-utils/bytesconv"
+	"github.com/charlienet/go-utils/bytex"
 )
 
 // ---- 测试桩：实现各契约接口的最小可注册类型 ----
@@ -66,13 +66,13 @@ func (s *stubAsymmetric) ExportPublicKey() (string, error) {
 	return "", nil
 }
 func (s *stubAsymmetric) Name() string { return "stub-asym" }
-func (s *stubAsymmetric) Encrypt(msg []byte) (bytesconv.BytesResult, error) {
+func (s *stubAsymmetric) Encrypt(msg []byte) (bytex.Bytes, error) {
 	return nil, nil
 }
-func (s *stubAsymmetric) Decrypt(ciphertext []byte) (bytesconv.BytesResult, error) {
+func (s *stubAsymmetric) Decrypt(ciphertext []byte) (bytex.Bytes, error) {
 	return nil, nil
 }
-func (s *stubAsymmetric) Sign(msg []byte) (bytesconv.BytesResult, error) {
+func (s *stubAsymmetric) Sign(msg []byte) (bytex.Bytes, error) {
 	return nil, nil
 }
 func (s *stubAsymmetric) Verify(msg, sign []byte) bool { return true }
@@ -366,7 +366,7 @@ func TestRegistryConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			defer wg.Done()
 			alg := fmt.Sprintf("TEST-REG-CONC-C-%d", i)
