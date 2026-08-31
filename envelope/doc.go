@@ -19,12 +19,10 @@
 //
 //   - 高层信封 API（Encrypt/Decrypt/EncryptWithAAD/DecryptWithAAD）的算法名
 //     **必须精确指定**（如 "AES-128"/"AES-192"/"AES-256"、"SM4" 等），
-//     不可使用泛名。泛名 "AES" 仅低层 crypto.NewCipher 支持（允许 16/24/32
-//     字节密钥，按密钥长度确定实际算法）。高层 API 传入泛名 "AES" 时，
-//     crypto.NormalizeAlgorithm 会将其归一化为 "AES-128"：若密钥长度恰为
-//     16 字节则正常加密，否则返回密钥长度错误
-//     （如 "invalid key length 24 for AES-128, want 16"），
-//     此时应改用精确算法名（如 AES-192/AES-256）以匹配实际密钥长度。
+//     不可使用泛名。泛名 "AES" 经 crypto.NormalizeAlgorithm 归一为
+//     "AES-128"（P3#23 破坏性变更：语义等同 AES-128，密钥长度必须恰为
+//     16 字节，否则返回密钥长度错误；需要 AES-192/AES-256 时请改用
+//     精确算法名以匹配实际密钥长度）。
 //   - DES/3DES 块大小为 8 字节，无法使用 GCM 认证加密，高层 API 返回明确错误。
 //
 // # gcx1 字节布局（冻结格式）
@@ -84,7 +82,87 @@
 //   - 适配器交付须附跨实现互操作向量测试（固定密钥/明文/随机数下的
 //     期望密文断言），防止格式漂移。
 //
-// # fsb1 流式分块 AEAD
+// # fsb2 自描述文件容器（推荐，v1.0.0 起）
+//
+// fsb2 是 fsb1 的演进格式：固定 28 字节文件头内嵌全部带外元数据，
+// 加密/解密两端不再需要外部传递 baseNonce/明文总长/算法标识，
+// 解密侧构造器只收密钥（totalSize/baseNonce 从密文流自读）。
+//
+// # fsb2 头部字节布局（冻结格式）
+//
+//	offset  size  field
+//	0       6     magic "GOFSB2"
+//	6       1     version（0x00，首版冻结）
+//	7       1     algID（查表映射 symmetric 注册键）
+//	8       12    baseNonce（随机 12 字节）
+//	20      8     明文总长（uint64 小端）
+//
+// 头部共 28 字节；分块大小固定 ChunkSize(4096)（与 fsb1 一致，常量不可
+// 配置），不入头部。头部整体（28 字节）作为每块 GCM AAD 前缀绑定
+// （参照 gcx1 v2 的 header 入 AAD 防篡改做法），块号以 BE64 追加在尾——
+// 篡改头部任一字节（含算法混淆、长度回滚）都会被对应块的 GCM 认证拒绝。
+//
+// baseNonce 由 NewFileEncrypter 内部经 crypto/rand 生成并写入头部，
+// 每次加密独立随机，调用方无需（也不应）自行提供，消除 fsb1 的 nonce
+// 复用责任。算法 ID 与密钥长度在两侧入口严格校验（对齐 Lane A 的
+// Insecure 元数据闸门），DES/3DES 等不安全算法在头部校验处被拒绝。
+//
+// # 用法示例（大文件加密）
+//
+//	package main
+//
+//	import (
+//		"fmt"
+//		"io"
+//		"log"
+//		"os"
+//
+//		"github.com/charlienet/go-crypto/envelope"
+//	)
+//
+//	func main() {
+//		key := make([]byte, 16) // AES-128
+//		src, _ := os.Open("plaintext.bin")
+//		defer src.Close()
+//		stat, _ := src.Stat()
+//
+//		// 加密：构造器自管 nonce/算法；仅需声明明文总长（写入头部）
+//		enc, err := envelope.NewFileEncrypter(key, "AES-128")
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		encReader, err := enc.Encrypt(src, stat.Size())
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		dst, _ := os.Create("encrypted.bin")
+//		defer dst.Close()
+//		// 密文长度可预知（含 28 字节头部），可作 S3 PutObject ContentLength
+//		fmt.Printf("Encrypted size: %d bytes\n", encReader.Length())
+//		io.Copy(dst, encReader)
+//
+//		// 解密：只收密钥，头部（magic/version/algID/baseNonce/totalSize）
+//		// 从密文流自读并校验，构造时无需任何带外参数
+//		encFile, _ := os.Open("encrypted.bin")
+//		defer encFile.Close()
+//		decReader, err := envelope.NewFileDecryptingReader(encFile, key)
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		out, _ := os.Create("decrypted.bin")
+//		defer out.Close()
+//		io.Copy(out, decReader)
+//
+//		os.Remove("encrypted.bin")
+//		os.Remove("decrypted.bin")
+//	}
+//
+// # fsb1 流式分块 AEAD（遗留，已冻结）
+//
+// ⚠️ 遗留格式：密文流无容器头部，baseNonce/明文总长/算法标识全部带外
+// 管理，解密构造必须外部传入 totalSize——评审 #2 指出的误用根因。
+// **新集成请使用上方 fsb2 自描述容器**；fsb1 仅保留存量数据兼容，
+// 格式冻结只读，禁止改动。
 //
 // 明文按 ChunkSize(4096) 分块，每块使用 AES/SM4-GCM 独立加密，输出连续的
 // "密文块 || 16 字节认证标签"流。块 nonce 由 baseNonce（12 字节）视为
@@ -96,12 +174,13 @@
 // 使用 fsb1 流式加密时，调用方**必须**保证 baseNonce 在密钥生命周期内唯一。
 // nonce 复用将导致 GCM 认证失效，可能泄露明文。
 //
-// # 场景 6：fsb1 流式分块 AEAD（大文件加密）
+// # 场景 6：fsb1 流式分块 AEAD（遗留示例，新集成改用 fsb2）
 //
 //	package main
 //
 //	import (
 //		"bytes"
+//		"crypto/rand"
 //		"fmt"
 //		"io"
 //		"log"
@@ -116,7 +195,17 @@
 //		// 准备密钥和 nonce
 //		key := make([]byte, 16) // AES-128
 //		baseNonce := make([]byte, 12)
-//		// 在真实场景中，使用 crypto.GenerateKey("AES-128") 和随机 nonce
+//		if _, err := rand.Read(baseNonce); err != nil {
+//			log.Fatal(err)
+//		}
+//		// ⚠️ 同一密钥下 baseNonce 绝对不可复用：fsb1 的块 nonce 由
+//		// baseNonce 按块号递增派生，baseNonce 复用等价于 GCM nonce 复用，
+//		// 将导致认证失效甚至明文泄露。建议每次加密生成随机 baseNonce，
+//		// 并随密文带外持久化，解密时再传入。
+//		// ⚠️ 迁移提示：fsb1 为遗留格式（nonce/长度/算法全部带外管理），
+//		// 新集成请改用 fsb2（NewFileEncrypter/NewFileDecryptingReader）：
+//		// baseNonce 由库内随机生成并写入容器头部，无需（也不应）自行提供。
+//		// 在真实场景中，使用 crypto.GenerateKey("AES-128") 生成密钥。
 //
 //		// 创建 Cipher 对象
 //		cipher, err := crypto.NewCipher("AES-128", key)

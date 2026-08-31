@@ -40,6 +40,9 @@
 //
 //   - 密码派生：优先 Argon2id（新系统）或 PBKDF2（兼容遗留）
 //   - Salt：至少 16 字节随机值，每次派生唯一
-//   - 迭代次数/内存：根据硬件性能调整，建议 PBKDF2 ≥ 100000 次，Argon2id 内存 ≥ 64MB
+//   - 迭代次数/内存：根据硬件性能调整，建议 PBKDF2 ≥ 600000 次
+//     （OWASP 2024 密码存储建议，HMAC-SHA256 不低于 600,000 次，
+//     与 keymgr/pbes2.go 的 pbes2PBKDF2Iterations=600_000 一致），
+//     Argon2id 内存 ≥ 64MB
 //   - Info 字段（HKDF）：用于区分不同用途的密钥，防止密钥混淆攻击
 package kdf

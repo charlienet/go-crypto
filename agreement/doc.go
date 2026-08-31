@@ -23,6 +23,16 @@
 //	kp, err := ka.GenerateKey()
 //	secret, err := ka.DeriveSharedSecret(peerPublicKey)
 //
+// 一步式派生助手 DeriveKey 从协商器直接派生长度化密钥（共享秘密 +
+// HKDF 一体化）：
+//
+//	key, err := agreement.DeriveKey(ka, peerPublicKey, salt, info, 32)
+//
+// 内部优先断言 rootcrypto.KeyDeriver（可选扩展接口，见根包 keyagreement.go，
+// 当前内置协商器均未实现），否则回退 DeriveSharedSecret → HKDF("SHA-256")
+// 并及时清零中间共享秘密。注意与 kdf.DeriveKey（Argon2id 口令派生）同名
+// 不同义。
+//
 // 注意：SM2 协商的 DeriveSharedSecret 已被禁用（原实现为不安全的裸标量
 // 乘法拼接 x||y，非标准 SM2 KAP——无前向保密、无 SM3-KDF、无密钥确认、
 // 输出长度不稳定），详见 sm2.go 的说明。需要 SM2 曲线上的协商时请改用

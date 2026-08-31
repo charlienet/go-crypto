@@ -21,8 +21,10 @@
 //	loaded, err := keymgr.ParsePrivateKeyPair(der, keymgr.KeyFormatPEM,
 //		keymgr.WithPassword(password))
 //
-// 密钥格式：KeyFormatBase64（默认，Base64 编码的 DER）、KeyFormatPEM、
-// KeyFormatHex、KeyFormatRaw。PEM 私钥加密使用 PBES2
+// 密钥格式：KeyFormatBase64（Base64 编码的 DER）、KeyFormatPEM、
+// KeyFormatHex、KeyFormatRaw。format 为**必填参数**：调用方须显式传入
+// 格式枚举，不存在隐式默认格式（零值即 KeyFormatBase64，但不应依赖该
+// 巧合）：不传等于传 KeyFormatBase64。PEM 私钥加密使用 PBES2
 // （PBKDF2-HMAC-SHA256 + AES-256-CBC，RFC 8018），取代已弃用的
 // x509.EncryptPEMBlock 传统格式；传统加密 PEM 仅保留读取兼容。
 //

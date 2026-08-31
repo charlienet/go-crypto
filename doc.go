@@ -1,8 +1,8 @@
 // Package crypto 是 go-misc 的加密契约层：定义接口、枚举、选项契约、错误
 // 哨兵、引擎注册表与协议层入口。全部算法实现位于子包
-// （symmetric/asym/agreement/keymgr），经注册表挂载（database/sql
-// driver 模式）；依赖方向保持单向（子包 → 本包 → common），本包永不
-// import 子包。
+// （symmetric/asym/agreement/keymgr/hash/hmac/kdf），经注册表挂载
+// （database/sql driver 模式）；依赖方向保持单向（子包 → 本包 → common），
+// 本包永不 import 子包。
 //
 // # 契约面
 //
@@ -139,13 +139,19 @@
 //
 // # 已知陷阱
 //
-//   - bytex.Bytes.String() 返回 Hex 编码字符串，而非原文。
-//     如需原文，请使用 []byte 强制转换或 bytex.Bytes.Open() 读取。
+//   - bytex.Bytes.String() 返回带转义的可打印字符串（内部经
+//     strconv.Quote 输出，含双引号与转义序列），既非 Hex 编码也非原文。
+//     摘要的展示与存储请一律使用 .Hex()；如需原文请使用 .Bytes()
+//     （或 .Open() 以 io.Reader 顺序读取）。
 //   - DES/3DES 块大小为 8 字节，无法使用 GCM 认证加密。
-//   - NormalizeAlgorithm 将泛名 "AES" 归一为 "AES-128"：低层 NewCipher
-//     支持 16/24/32 字节密钥（按密钥长度确定实际算法），但泛名传入高层
-//     信封 API 时密钥长度必须恰为 16 字节，否则返回密钥长度错误；
-//     高层 API 请使用精确算法名（如 "AES-128"/"AES-192"/"AES-256"）。
+//   - NormalizeAlgorithm 将泛名 "AES" 归一为 "AES-128"（低层
+//     NewCipher/GenerateKey 与根包入口统一经此归一；P3#23 破坏性变更：
+//     泛名不再按 16/24/32 字节密钥自动选档）。泛名 "AES" 传 24/32 字节
+//     密钥将返回密钥长度错误；需要 AES-192/AES-256 时请使用精确算法名
+//     （如 "AES-128"/"AES-192"/"AES-256"）。
+//   - DES/3DES 与 ECB 默认被拒绝（ErrInsecureAlgorithm）：低层
+//     NewCipher/GenerateKey/NewECB 与协议层 Encrypt/Decrypt 均需显式
+//     WithInsecureAlgorithms() 放行（详见 WithInsecureAlgorithms 文档）。
 //   - ECB 模式无随机性，相同明文块产生相同密文块，不推荐使用；
 //     NewECB/NewCTR 等入口均已加 Deprecated 警告标注。
 //   - CBC/CFB/OFB 使用固定 IV 时，同一 mode 对象仅允许 Encrypt 一次，
