@@ -86,36 +86,35 @@ func TestHashComparer(t *testing.T) {
 	assert.NoError(t, err)
 
 	msg := []byte("hello")
-	sign, err := c.Sign(msg)
-	assert.NoError(t, err)
+	// Digest 无 error 返回：哈希计算不会失败
+	sum := c.Digest(msg)
 
 	// 验证正确
-	assert.True(t, c.Verify(msg, sign))
+	assert.True(t, c.Compare(msg, sum.Bytes()))
 
 	// 验证错误消息
-	assert.False(t, c.Verify([]byte("wrong"), sign))
+	assert.False(t, c.Compare([]byte("wrong"), sum.Bytes()))
 }
 
-func TestHashComparer_VerifyConstantTime(t *testing.T) {
+func TestHashComparer_CompareConstantTime(t *testing.T) {
 	c, err := New("MD5")
 	assert.NoError(t, err)
 
 	msg := []byte("hello")
-	sign, err := c.Sign(msg)
-	assert.NoError(t, err)
+	sum := c.Digest(msg)
 
 	// 正确摘要返回 true
-	assert.True(t, c.Verify(msg, sign))
+	assert.True(t, c.Compare(msg, sum.Bytes()))
 
 	// 错误摘要返回 false
-	wrongSign := make([]byte, len(sign))
-	copy(wrongSign, sign)
-	wrongSign[0] ^= 0xff
-	assert.False(t, c.Verify(msg, wrongSign))
+	wrongDigest := make([]byte, len(sum.Bytes()))
+	copy(wrongDigest, sum.Bytes())
+	wrongDigest[0] ^= 0xff
+	assert.False(t, c.Compare(msg, wrongDigest))
 
 	// 长度不等的 target 返回 false
-	assert.False(t, c.Verify(msg, sign[:len(sign)-1]))
-	assert.False(t, c.Verify(msg, append(append([]byte{}, sign...), 0x00)))
+	assert.False(t, c.Compare(msg, sum.Bytes()[:len(sum.Bytes())-1]))
+	assert.False(t, c.Compare(msg, append(append([]byte{}, sum.Bytes()...), 0x00)))
 }
 
 func TestHash_EmptyInput(t *testing.T) {

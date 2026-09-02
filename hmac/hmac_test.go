@@ -1,6 +1,7 @@
 package hmac
 
 import (
+	"bytes"
 	"encoding/hex"
 	"testing"
 
@@ -24,21 +25,21 @@ x-ca-timestamp:1754373030
 	s, err := New("HMACSM3", []byte(c))
 	require.NoError(t, err)
 
-	sign, err := s.Sign(key)
+	sign, err := s.Digest(key)
 	require.NoError(t, err)
 
-	// 真实断言：签名非空、确定性与可变性
+	// 真实断言：MAC 非空、确定性与可变性
 	assert.NotEmpty(t, sign)
-	// HMAC 确定性：同 key+消息 必须产出相同签名
-	sign2, err := s.Sign(key)
+	// HMAC 确定性：同 key+消息 必须产出相同 MAC
+	sign2, err := s.Digest(key)
 	require.NoError(t, err)
 	assert.Equal(t, sign.Bytes(), sign2.Bytes(), "相同输入的 HMAC 必须确定")
-	// 正反验证：正确签名通过、消息被篡改后必须失败
-	//（注意：New 的 key 参数为 []byte(c)，Sign 的 msg 参数为 key 内码，
-	// 故 Verify 的 msg 应传 key）
-	assert.True(t, s.Verify(key, sign))
-	assert.False(t, s.Verify(append(append([]byte(nil), key...), 'x'), sign))
-	assert.False(t, s.Verify(key, sign2[:len(sign2)-1]))
+	// 正反验证：正确 MAC 通过、消息被篡改后必须失败
+	//（注意：New 的 key 参数为 []byte(c)，Digest 的 msg 参数为 key 内码，
+	// 故 Compare 的 msg 应传 key）
+	assert.True(t, s.Compare(key, sign))
+	assert.False(t, s.Compare(append(append([]byte(nil), key...), 'x'), sign))
+	assert.False(t, s.Compare(key, sign2[:len(sign2)-1]))
 }
 
 // TestSm3_KnownVector：SM3("abc") 标准摘要。
@@ -88,35 +89,48 @@ func TestHMacComparer_KeyCopy(t *testing.T) {
 	key := []byte("original-key")
 	c, err := New("HMACSHA256", key)
 	require.NoError(t, err)
-	sign1, err := c.Sign([]byte("msg"))
+	sign1, err := c.Digest([]byte("msg"))
 	require.NoError(t, err)
 
-	// 修改原切片：若未拷贝，实例密钥随之改变，两次签名将一致（断言失败）
+	// 修改原切片：若未拷贝，实例密钥随之改变，两次计算将一致（断言失败）
 	key[0] = 'X'
 	c2, err := New("HMACSHA256", []byte("Xriginal-key"))
 	require.NoError(t, err)
-	sign2, err := c2.Sign([]byte("msg"))
+	sign2, err := c2.Digest([]byte("msg"))
 	require.NoError(t, err)
 	assert.NotEqual(t, sign1.Bytes(), sign2.Bytes(), "修改外部 key 不应影响已构造实例")
 }
 
-// TestHMacComparer_Zero：#27b Zero 清零密钥后 Verify 必须失败且不 panic；
-// Sign 以 nil key 调用不得 panic（调用方须避免复用已 Zero 实例）。
+// TestHMacComparer_Zero：#27b Zero 清零密钥后 Compare 必须恒失败且不 panic；
+// Digest/From 返回 ErrZeroed、Hasher panic（新行为，详见 TestHMacComparer_Zeroed）。
 func TestHMacComparer_Zero(t *testing.T) {
 	c, err := New("HMACSHA256", []byte("secret-key"))
 	require.NoError(t, err)
 
 	msg := []byte("hello")
-	target, err := c.Sign(msg)
+	target, err := c.Digest(msg)
 	require.NoError(t, err)
-	assert.True(t, c.Verify(msg, target), "Zero 前验证应通过")
+	assert.True(t, c.Compare(msg, target.Bytes()), "Zero 前验证应通过")
 
 	c.Zero()
-	assert.False(t, c.Verify(msg, target), "Zero 后 Verify 必须失败")
-	assert.False(t, c.Verify(msg, nil), "Zero 后对任意目标均必须失败")
+	assert.False(t, c.Compare(msg, target.Bytes()), "Zero 后 Compare 必须失败")
+	assert.False(t, c.Compare(msg, nil), "Zero 后对任意目标均必须失败")
+}
 
-	// 不 panic 防护
-	s, err := c.Sign(msg)
-	require.NoError(t, err, "Zero 后 Sign 不应 panic")
-	assert.NotNil(t, s)
+// TestHMacComparer_Zeroed：Zero 后的显式行为——Digest/From 返回 ErrZeroed
+// 且结果为 nil，Hasher panic（复用已销毁实例属编程错误）。
+func TestHMacComparer_Zeroed(t *testing.T) {
+	c, err := New("HMACSHA256", []byte("secret-key"))
+	require.NoError(t, err)
+	c.Zero()
+
+	got, err := c.Digest([]byte("hello"))
+	assert.ErrorIs(t, err, ErrZeroed, "Zero 后 Digest 必须返回 ErrZeroed")
+	assert.Nil(t, got, "Zero 后 Digest 结果必须为 nil")
+
+	got, err = c.From(bytes.NewReader([]byte("hello")))
+	assert.ErrorIs(t, err, ErrZeroed, "Zero 后 From 必须返回 ErrZeroed")
+	assert.Nil(t, got, "Zero 后 From 结果必须为 nil")
+
+	assert.Panics(t, func() { c.Hasher() }, "Zero 后 Hasher 必须 panic")
 }

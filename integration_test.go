@@ -1,6 +1,8 @@
 package crypto_test
 
 import (
+	"bytes"
+
 	crypto "github.com/charlienet/go-crypto"
 	"github.com/charlienet/go-crypto/hash"
 	"github.com/charlienet/go-crypto/hmac"
@@ -196,11 +198,19 @@ func TestHashIntegration(t *testing.T) {
 			hasher, err := hash.New(tc.algorithm)
 			require.NoError(t, err)
 			
-			result, err := hasher.Sign([]byte(tc.message))
-			require.NoError(t, err)
-			digest2 := result
+			digest2 := hasher.Digest([]byte(tc.message))
 
 			assert.Equal(t, digest1.Bytes(), digest2.Bytes(), "Direct hash and New hasher should produce same result")
+
+			// 流式与增量入口应与一次性路径完全等价
+			msg := []byte(tc.message)
+			digest3, err := hasher.From(bytes.NewReader(msg))
+			require.NoError(t, err)
+			assert.Equal(t, digest1.Bytes(), digest3.Bytes(), "Streaming From should match one-shot digest")
+
+			ok, err := hasher.CompareFrom(bytes.NewReader(msg), digest1.Bytes())
+			require.NoError(t, err)
+			assert.True(t, ok, "CompareFrom should match the same stream content")
 
 			// Test with different input
 			differentDigest := hashFunc([]byte("Different message"))
@@ -233,21 +243,31 @@ func TestHMACIntegration(t *testing.T) {
 			macObj, err := hmac.New(tc.algorithm, []byte(tc.key))
 			require.NoError(t, err)
 			
-			result, err := macObj.Sign([]byte(tc.message))
+			mac2, err := macObj.Digest([]byte(tc.message))
 			require.NoError(t, err)
-			mac2 := result
 
 			assert.Equal(t, mac1.Bytes(), mac2.Bytes(), "Direct MAC and New MAC should produce same result")
 
 			// Test verification
-			isValid := macObj.Verify([]byte(tc.message), mac1.Bytes())
+			isValid := macObj.Compare([]byte(tc.message), mac1.Bytes())
 			assert.True(t, isValid, "HMAC verification should pass")
+
+			// 流式认证入口应与一次性路径等价
+			ok, err := macObj.CompareFrom(bytes.NewReader([]byte(tc.message)), mac1.Bytes())
+			require.NoError(t, err)
+			assert.True(t, ok, "CompareFrom should authenticate the same stream")
+
+			// 增量对象应与描述器结果一致
+			hasher := macObj.Hasher()
+			_, err = hasher.Write([]byte(tc.message))
+			require.NoError(t, err)
+			assert.Equal(t, mac1.Bytes(), hasher.Sum(nil), "Hasher should match descriptor")
 
 			// Test with wrong key
 			wrongHmacFunc, err := hmac.ByName(tc.algorithm)
 			require.NoError(t, err)
 			wrongMac := wrongHmacFunc([]byte("wrong-key"), []byte(tc.message))
-			isInvalid := macObj.Verify([]byte(tc.message), wrongMac.Bytes())
+			isInvalid := macObj.Compare([]byte(tc.message), wrongMac.Bytes())
 			assert.False(t, isInvalid, "HMAC verification should fail with wrong key")
 		})
 	}

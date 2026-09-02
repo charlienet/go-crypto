@@ -59,43 +59,47 @@ func TestByName(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestHashComparer_SignVerify(t *testing.T) {
+func TestHashComparer_DigestCompare(t *testing.T) {
 	key := []byte("secret-key")
 	c, err := New("HMACSHA256", key)
 	assert.NoError(t, err)
 
 	msg := []byte("hello world")
-	sign, err := c.Sign(msg)
+	mac, err := c.Digest(msg)
 	assert.NoError(t, err)
-	assert.NotEmpty(t, sign)
+	assert.NotEmpty(t, mac)
 
 	// 验证正确
-	assert.True(t, c.Verify(msg, sign))
+	assert.True(t, c.Compare(msg, mac))
 
 	// 验证错误消息
-	assert.False(t, c.Verify([]byte("wrong"), sign))
+	assert.False(t, c.Compare([]byte("wrong"), mac))
 
-	// 验证错误签名
-	wrongSign := make([]byte, len(sign))
-	copy(wrongSign, sign)
-	wrongSign[0] ^= 0xff
-	assert.False(t, c.Verify(msg, wrongSign))
+	// 验证错误 MAC
+	wrongMac := make([]byte, len(mac))
+	copy(wrongMac, mac)
+	wrongMac[0] ^= 0xff
+	assert.False(t, c.Compare(msg, wrongMac))
 
-	// 验证长度不等的签名
-	assert.False(t, c.Verify(msg, sign[:len(sign)-1]))
-	assert.False(t, c.Verify(msg, append(append([]byte{}, sign...), 0x00)))
+	// 验证长度不等的 MAC
+	assert.False(t, c.Compare(msg, mac[:len(mac)-1]))
+	assert.False(t, c.Compare(msg, append(append([]byte{}, mac...), 0x00)))
 }
 
 func TestHashComparer_DifferentKeys(t *testing.T) {
 	msg := []byte("hello")
 
-	c1, _ := New("HMACSHA256", []byte("key1"))
-	c2, _ := New("HMACSHA256", []byte("key2"))
+	c1, err := New("HMACSHA256", []byte("key1"))
+	assert.NoError(t, err)
+	c2, err := New("HMACSHA256", []byte("key2"))
+	assert.NoError(t, err)
 
-	sign1, _ := c1.Sign(msg)
-	sign2, _ := c2.Sign(msg)
+	sign1, err := c1.Digest(msg)
+	assert.NoError(t, err)
+	sign2, err := c2.Digest(msg)
+	assert.NoError(t, err)
 
-	// 不同 key 应该产生不同签名
+	// 不同 key 应该产生不同 MAC
 	assert.NotEqual(t, sign1.Bytes(), sign2.Bytes())
 }
 
@@ -103,12 +107,15 @@ func TestHashComparer_Deterministic(t *testing.T) {
 	key := []byte("secret")
 	msg := []byte("hello")
 
-	c, _ := New("HMACSHA256", key)
+	c, err := New("HMACSHA256", key)
+	assert.NoError(t, err)
 
-	sign1, _ := c.Sign(msg)
-	sign2, _ := c.Sign(msg)
+	sign1, err := c.Digest(msg)
+	assert.NoError(t, err)
+	sign2, err := c.Digest(msg)
+	assert.NoError(t, err)
 
-	// 相同 key 和消息应该产生相同签名
+	// 相同 key 和消息应该产生相同 MAC
 	assert.Equal(t, sign1.Bytes(), sign2.Bytes())
 }
 

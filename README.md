@@ -96,6 +96,17 @@ import "github.com/charlienet/go-crypto/hash"
 
 d1 := hash.Sha256([]byte("hello")) // 摘要展示/存储请用 .Hex()，String() 是带转义的引号形式
 d2 := hash.Sm3([]byte("hello"))
+
+// 流式计算（大文件/大数据量，无需一次性读入内存）：
+f, err := os.Open("bigfile.bin")
+if err != nil { panic(err) }
+defer f.Close()
+d3, err := hash.Sha256From(f) // 内部 io.Copy 增量计算，读取错误会返回
+
+// 按算法名构造描述器（无状态、可并发共享）：
+c, err := hash.New("SM3")
+d4 := c.Digest(msg)           // 哈希计算不会失败，故无 error
+ok := c.Compare(msg, want)    // 长度预检 + 常量时间比较
 ```
 
 ### HMAC
@@ -104,9 +115,66 @@ d2 := hash.Sm3([]byte("hello"))
 import "github.com/charlienet/go-crypto/hmac"
 
 c, err := hmac.New("HMACSHA256", key) // 算法名大小写不敏感，支持 SM3（HMACSM3）
-sign, err := c.Sign([]byte("message"))
-ok := c.Verify([]byte("message"), sign)
+sig, err := c.Digest([]byte("message")) // 实例 Zero() 后返回 ErrZeroed，不静默产出无密钥 MAC
+ok := c.Compare([]byte("message"), sig)  // 长度预检 + 常量时间比较
+
+// 流式计算（大文件/大数据量，无需一次性读入内存）：
+mac, err := hmac.Sha256From(key, f) // 内部 io.Copy 增量计算，读取错误会返回
 ```
+
+### 流式哈希与并发
+
+`Xxx` / `XxxFrom` 均为纯函数（每次调用新建哈希对象、无共享可变状态），多协程并发调用安全。
+库刻意不提供异步变体——goroutine 的所有权归调用方，一行 `go` 即可协程化：
+
+```go
+type res struct {
+	sum bytex.Bytes
+	err error
+}
+
+done := make(chan res, 1) // 缓冲 1：ctx 取消后后台协程仍能写入并退出，不泄漏
+go func() {
+	s, err := hash.Sha256From(f)
+	done <- res{s, err}
+}()
+
+// ... 此处并行做其它工作 ...
+
+select {
+case <-ctx.Done():
+	return nil, ctx.Err()
+case r := <-done:
+	return r.sum, r.err
+}
+```
+
+`hash.New` / `hmac.New` 返回的描述器只持构造函数（无可变状态，可多协程共享）。
+同一数据源要算多个摘要时，用 `Hasher()` 各取一份全新的标准库增量对象配 `io.MultiWriter`，数据只读一次：
+
+```go
+sha, _ := hash.New("SHA256")
+sm3, _ := hash.New("SM3")
+
+h1, h2 := sha.Hasher(), sm3.Hasher() // 双轨合规：一次读取同时出 SHA-256 与 SM3
+if _, err := io.Copy(io.MultiWriter(h1, h2), f); err != nil {
+	return err
+}
+sha256Sum, sm3Sum := h1.Sum(nil), h2.Sum(nil)
+```
+
+校验大文件/数据流时用 `CompareFrom` 把「读流 → 算摘要 → 常量时间比较」一步做完，
+无需整读内存，也无需自己写比较逻辑：
+
+```go
+ok, err := sha.CompareFrom(f, want)   // 必须先判 err：IO 故障不等于校验不通过
+mac, err := c.CompareFrom(f, wantMac) // hmac 侧同理；实例 Zero() 后返回 ErrZeroed
+```
+
+注意：`io.Copy` 不响应 context，需中途停止须传入 ctx-aware 的 Reader；
+`Hasher()` 返回的 `hash.Hash` 持有增量状态，非并发安全，勿跨协程共享，
+每个协程各自调 `Hasher()` 取独立实例即可（描述器本身只读可共享）。
+取消边界的 `ctxReader` 写法与「单个摘要不可拆块并行」的原因，见各包 `doc.go` 的 Concurrency 小节。
 
 ### 密钥派生
 
