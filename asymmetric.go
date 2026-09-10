@@ -80,7 +80,9 @@ func NewAsymmetric(algorithm AsymmetricAlgorithm, opts ...AsymOption) (Asymmetri
 // 参数默认值（0 值 → 默认）由各算法实现消费时归一：
 //   - RSAKeyBits：0 → 2048；经 WithRSAKeyBits 显式传 <2048 在选项应用期拒绝
 //   - ECDSACurve："" → P256（经 WithECDSACurve 显式传非白名单值拒绝）
-//   - Hash：0 → SHA256（经 WithAsymHash 显式传白名单外摘要算法拒绝）
+//   - Hash：0 → SHA256（经 WithAsymHash 显式传白名单外摘要算法拒绝；
+//     SHA-1 属构造期闸门控制项，应用期放行、由算法实现在构造期经
+//     AllowInsecure 判定，不再是"白名单外即拒"）
 //   - SM2UID：nil → gmsm 默认 UID（经 WithSM2UID 显式覆盖）
 //   - SM2LegacyCipher：false → 使用新认证密文格式（C1C3C2）；true → 遗留
 //     非认证格式（C1C2C3），仅对接遗留系统时启用
@@ -95,13 +97,21 @@ type AsymConfig struct {
 	// ECDSACurve ECDSA 曲线名。"" → P256；白名单 P256/P384/P521
 	//（输入大小写不敏感、忽略连字符，存储为规范形式 "P256"/"P384"/"P521"）。
 	ECDSACurve string
-	// Hash 签名摘要算法。0 → SHA256；白名单 SHA-256/SHA-384/SHA-512。
+	// Hash 签名摘要算法。0 → SHA256；白名单 SHA-1/SHA-256/SHA-384/SHA-512
+	//（SHA-1 为不安全项，构造期须经 AllowInsecure 闸门放行，仅 RSA 支持）。
 	Hash crypto.Hash
 	// SM2UID SM2 用户标识。nil → gmsm 库默认 UID（"1234567812345678"）。
 	SM2UID []byte
 	// SM2LegacyCipher 使用 SM2 遗留非认证密文格式（C1C2C3）。
 	// 默认 false：新认证格式（C1C3C2）。仅对接遗留系统时启用。
 	SM2LegacyCipher bool
+	// RSASignPKCS1v15 RSA 签名/验签使用 PKCS#1 v1.5 填充（默认 PSS）。
+	// 仅影响 Sign/Verify，加密（Encrypt/Decrypt）始终使用 OAEP；
+	// 仅遗留系统互操作时启用。
+	RSASignPKCS1v15 bool
+	// AllowInsecure 放行不安全配置（WithAsymInsecureAlgorithms()）。
+	// 当前覆盖 RSA 签名 SHA-1 摘要（构造期闸门判定）。
+	AllowInsecure bool
 }
 
 // AsymOption 非对称构造选项函数。返回 error：选项在构造期可失败，
@@ -188,8 +198,12 @@ func WithECDSACurve(curve string) AsymOption {
 }
 
 // WithAsymHash 设置签名摘要算法（默认 SHA256）。
-// 白名单：SHA-256/SHA-384/SHA-512；0 表示走默认。白名单外返回值
-// ErrInvalidAsymOption。命名用 AsymHash 前缀以区别于 keypair.go 的
+// 白名单：SHA-1/SHA-256/SHA-384/SHA-512；0 表示走默认。白名单外值
+// （MD5/MD5SHA1 等）返回 ErrInvalidAsymOption。
+// SHA-1 属不安全摘要：应用期仅接受写入配置，安全性判定延迟到构造期
+// 闸门——仅 RSA 支持，且须经 WithAsymInsecureAlgorithms() 放行，否则
+// 构造时返回 ErrInsecureAlgorithm；选项顺序无关（判定在构造期统一进行）。
+// 命名用 AsymHash 前缀以区别于 keypair.go 的
 // KeyGenOption（KeyGenOption 无对应哈希选项，预留命名空间避免未来混淆）。
 func WithAsymHash(h crypto.Hash) AsymOption {
 	return func(cfg *AsymConfig) error {
@@ -198,11 +212,11 @@ func WithAsymHash(h crypto.Hash) AsymOption {
 			return nil
 		}
 		switch h {
-		case crypto.SHA256, crypto.SHA384, crypto.SHA512:
+		case crypto.SHA1, crypto.SHA256, crypto.SHA384, crypto.SHA512:
 			cfg.Hash = h
 			return nil
 		}
-		return fmt.Errorf("%w: unsupported hash %v (whitelist: SHA256/SHA384/SHA512)", ErrInvalidAsymOption, h)
+		return fmt.Errorf("%w: unsupported hash %v (whitelist: SHA1/SHA256/SHA384/SHA512; SHA-1 须经 WithAsymInsecureAlgorithms() 构造期放行)", ErrInvalidAsymOption, h)
 	}
 }
 
@@ -222,6 +236,32 @@ func WithSM2UID(uid []byte) AsymOption {
 func WithSM2LegacyCiphertext() AsymOption {
 	return func(cfg *AsymConfig) error {
 		cfg.SM2LegacyCipher = true
+		return nil
+	}
+}
+
+// WithRSAPKCS1v15Signing RSA 签名/验签使用 PKCS#1 v1.5 填充（默认 PSS）。
+// 仅影响 RSA 的 Sign/Verify，Encrypt/Decrypt 始终使用 OAEP 不受本选项
+// 影响；填充格式切换属格式兼容开关，不涉及安全闸门。仅遗留系统互操作
+// （对端仅支持 RSASSA-PKCS1-v1_5 签名）时启用。
+func WithRSAPKCS1v15Signing() AsymOption {
+	return func(cfg *AsymConfig) error {
+		cfg.RSASignPKCS1v15 = true
+		return nil
+	}
+}
+
+// WithAsymInsecureAlgorithms 放行不安全非对称配置（与对称侧
+// WithInsecureAlgorithms 同风格的安全闸门）。
+//
+// 默认情况下，以下配置被拒绝（构造期返回 ErrInsecureAlgorithm）：
+//   - RSA 签名摘要算法 SHA-1（碰撞攻击实用化，仅限遗留系统互操作）
+//
+// 判定在构造期（工厂消费配置时）进行，与选项书写顺序无关；
+// 仅在对接遗留系统时必须使用，新代码应使用 SHA-256 及以上摘要。
+func WithAsymInsecureAlgorithms() AsymOption {
+	return func(cfg *AsymConfig) error {
+		cfg.AllowInsecure = true
 		return nil
 	}
 }

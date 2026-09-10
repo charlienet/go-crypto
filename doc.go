@@ -14,7 +14,8 @@
 //     KeyGenOption/KeyGenConfig（密钥生成），以及 ApplyOptions；
 //   - 错误哨兵：ErrUnknownAlgorithm/ErrKeyRequired/ErrInvalidKeyLength/
 //     ErrAuthenticationFailed/ErrInvalidPadding/ErrEngineNotRegistered 等，
-//     均支持 errors.Is 判定；
+//     均支持 errors.Is 判定（ErrInsecureAlgorithm 现同时覆盖非对称侧
+//     RSA 签名 SHA-1 摘要的构造期闸门）；
 //   - 注册表：RegisterCipherFactory/RegisterModeExecutor/RegisterAsymmetricFactory/
 //     RegisterKeyAgreementFactory/RegisterKeyPairGenerator 与对应查询函数；
 //   - 协议层入口：Encrypt/Decrypt/NewEncryptor（对称）、NewAsymmetric
@@ -122,12 +123,22 @@
 // 默认拒绝不安全的算法和模式：
 //   - DES（已被暴力破解）、TripleDES（安全性下降，块大小仅 8 字节）
 //   - ECB（泄露明文模式，相同明文块产生相同密文块）
+//   - RSA 签名摘要 SHA-1（碰撞攻击实用化；WithAsymHash(crypto.SHA1)
+//     应用期放行，构造期无 WithAsymInsecureAlgorithms() 时拒绝，
+//     返回 ErrInsecureAlgorithm；仅 RSA 支持，ECDSA/SM2 无放行通道）
 //
 // 对接遗留系统时，传入 WithInsecureAlgorithms() 显式 opt-in：
 //
 //	ct, err := crypto.Encrypt(crypto.DES, crypto.CBC, pt,
 //	    crypto.WithKey(key),
 //	    crypto.WithInsecureAlgorithms()) // 显式声明接受风险
+//
+// 非对称侧（RSA PKCS#1 v1.5 + SHA-1 签名，仅遗留系统互操作启用）：
+//
+//	signer, err := crypto.NewAsymmetric(crypto.RSA,
+//	    crypto.WithRSAPKCS1v15Signing(),      // 签名填充 PSS → v1.5（格式开关）
+//	    crypto.WithAsymHash(crypto.SHA1),     // 摘要算法
+//	    crypto.WithAsymInsecureAlgorithms())  // 构造期放行 SHA-1（安全闸门）
 //
 // # 算法推荐顺序
 //
@@ -156,6 +167,12 @@
 //     NewECB/NewCTR 等入口均已加 Deprecated 警告标注。
 //   - CBC/CFB/OFB 使用固定 IV 时，同一 mode 对象仅允许 Encrypt 一次，
 //     每条消息应使用新 IV（推荐 WithRandom* 变体或协议入口默认随机路径）。
+//   - RSA 签名默认使用 PSS 填充；WithRSAPKCS1v15Signing() 仅切换签名/验签
+//     填充为 PKCS#1 v1.5（Encrypt/Decrypt 始终为 OAEP 不受影响）。验签实例
+//     必须与签名方配置相同（padding + hash），跨 padding 验签返回 false，
+//     无自动回退探测（有意设计，防 padding confusion 攻击）。
+//   - SHA-1 经 WithAsymInsecureAlgorithms() 放行仍受 crypto.SHA1.Available()
+//     约束：FIPS 等禁用 SHA-1 的构建下该摘要不可用，构造期直接报错。
 //
 // 高层信封格式（gcx1 自描述信封、fsb1 流式分块 AEAD）位于子包
 // github.com/charlienet/go-crypto/envelope：密文自带算法标识，

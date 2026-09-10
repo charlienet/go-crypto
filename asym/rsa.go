@@ -14,15 +14,17 @@ import (
 )
 
 type rsa_algo struct {
-	prk  *rsa.PrivateKey
-	puk  *rsa.PublicKey
-	hash crypto.Hash
-	bits int
+	prk      *rsa.PrivateKey
+	puk      *rsa.PublicKey
+	hash     crypto.Hash
+	bits     int
+	pkcs1v15 bool
 }
 
 // asymHash 将 AsymConfig.Hash 归一为签名摘要算法（RSA/ECDSA 共用）：
 // 0 → 默认 SHA256；白名单 SHA256/SHA384/SHA512 原样返回。
 // 白名单外值返回错误（防御性兜底：正常经根包 WithAsymHash 已被拒绝）。
+// 注意：SHA-1 属构造期闸门控制项，由 newRSA 单独分支处理，不经本函数。
 func asymHash(h crypto.Hash) (crypto.Hash, error) {
 	if h == 0 {
 		return crypto.SHA256, nil
@@ -50,11 +52,28 @@ func newRSA(opts ...rootcrypto.AsymOption) (rootcrypto.Asymmetric, error) {
 	if algo.bits == 0 {
 		algo.bits = 2048
 	}
-	hash, err := asymHash(cfg.Hash)
-	if err != nil {
-		return nil, err
+	algo.pkcs1v15 = cfg.RSASignPKCS1v15
+	switch {
+	case cfg.Hash == 0:
+		algo.hash = crypto.SHA256
+	case cfg.Hash == crypto.SHA1:
+		// SHA-1 属真正不安全项：构造期闸门判定（与对称侧 DES/3DES/ECB
+		// 闸门体系同风格），须经 WithAsymInsecureAlgorithms() 显式 opt-in。
+		if !cfg.AllowInsecure {
+			return nil, fmt.Errorf("RSA SHA-1 signature hash: %w", rootcrypto.ErrInsecureAlgorithm)
+		}
+		if !crypto.SHA1.Available() {
+			return nil, errors.New("SHA-1 is not available in this build (FIPS?)")
+		}
+		algo.hash = crypto.SHA1
+	default:
+		// 其余值走既有白名单兜底（SHA256/SHA384/SHA512 放行，其他拒绝）。
+		hash, err := asymHash(cfg.Hash)
+		if err != nil {
+			return nil, err
+		}
+		algo.hash = hash
 	}
-	algo.hash = hash
 
 	// 优先使用密钥对象
 	if cfg.PrivateKeyObject != nil {
@@ -240,6 +259,13 @@ func (r *rsa_algo) Sign(data []byte) (bytex.Bytes, error) {
 	h.Write(data)
 	hashed := h.Sum(nil)
 
+	if r.pkcs1v15 {
+		// PKCS#1 v1.5（遗留互操作）：传 hash 标识 + digest，
+		// 由标准库内部构造 DigestInfo，禁止手写。
+		signature, err := rsa.SignPKCS1v15(rand.Reader, r.prk, r.hash, hashed)
+		return signature, err
+	}
+
 	// 显式指定 PSS 盐长度为 hash 长度（PSSSaltLengthEqualsHash）：
 	// 不依赖 SaltLengthAuto 的隐式推导，语义明确。
 	// 在 2048 位密钥 + SHA-256 下与 SaltLengthAuto 输出一致，行为不变。
@@ -252,6 +278,10 @@ func (r *rsa_algo) Sign(data []byte) (bytex.Bytes, error) {
 
 // Verify 校验签名。
 //
+// 注意：验签实例必须与签名方使用相同的 padding（PSS / PKCS#1 v1.5）与
+// hash 配置；跨 padding 验证返回 false（有意设计，防 padding confusion
+// 攻击，不做自动回退探测）。
+//
 // 注意：返回 false 无法区分"签名无效"与"公钥未设置"两种情况，
 // 调用方在依赖验证结果前应先确认公钥已配置（如先调用 ExportPublicKey
 // 或构造时注入公钥）。
@@ -263,6 +293,11 @@ func (r *rsa_algo) Verify(data, signature []byte) bool {
 	h := r.hash.New()
 	h.Write(data)
 	hashed := h.Sum(nil)
+
+	if r.pkcs1v15 {
+		// PKCS#1 v1.5 验签（遗留互操作）：与 Sign 分支同构。
+		return rsa.VerifyPKCS1v15(r.puk, r.hash, hashed, signature) == nil
+	}
 
 	// 验证侧显式使用 PSSSaltLengthAuto（自动探测盐长）：
 	// 兼容标准库默认（Auto）输出的最大盐长签名与本库 EqualsHash 签名。

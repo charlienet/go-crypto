@@ -164,7 +164,7 @@ var (
 	ErrInvalidHexNonce           = errors.New("crypto: invalid hex nonce")
 	ErrInvalidBase64Nonce        = errors.New("crypto: invalid base64 nonce")
 	ErrAuthenticationFailed      = errors.New("crypto: message authentication failed")
-	ErrInsecureAlgorithm         = errors.New("crypto: insecure algorithm/mode refused (DES/3DES/ECB); use WithInsecureAlgorithms() to override")
+	ErrInsecureAlgorithm         = errors.New("crypto: insecure algorithm/mode/hash refused (DES/3DES/ECB/SHA-1); use WithInsecureAlgorithms() or WithAsymInsecureAlgorithms() to override")
 	// ErrEmbedConflict EmbedIV/EmbedNonce 与显式 WithIV/WithNonce 同时使用时返回：
 	// 外部显式 IV/nonce 的语义是"密文不含前缀"，与"嵌入前缀"选项相互矛盾。
 	// 协议层默认即随机生成并嵌入（无 WithIV/WithNonce 时 EmbedIV/EmbedNonce 为

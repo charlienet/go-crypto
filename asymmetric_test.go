@@ -76,7 +76,8 @@ func TestAsymConfig_ECDSACurve(t *testing.T) {
 	assert.ErrorIs(t, err, rootcrypto.ErrInvalidAsymOption)
 }
 
-// TestAsymConfig_Hash WithAsymHash：SHA-256/384/512 白名单。
+// TestAsymConfig_Hash WithAsymHash：SHA-1/256/384/512 应用期白名单
+// （SHA-1 判定延迟到构造期闸门）。
 func TestAsymConfig_Hash(t *testing.T) {
 	for _, h := range []crypto.Hash{crypto.SHA256, crypto.SHA384, crypto.SHA512} {
 		cfg := &rootcrypto.AsymConfig{}
@@ -89,8 +90,14 @@ func TestAsymConfig_Hash(t *testing.T) {
 	require.NoError(t, apply(cfg, rootcrypto.WithAsymHash(0)))
 	assert.Zero(t, cfg.Hash)
 
+	// SHA-1：应用期放行写入配置（判定延迟到构造期闸门，见
+	// asymmetric_insecure_gate_test.go）
+	cfg = &rootcrypto.AsymConfig{}
+	require.NoError(t, apply(cfg, rootcrypto.WithAsymHash(crypto.SHA1)))
+	assert.Equal(t, crypto.SHA1, cfg.Hash)
+
 	// 白名单外拒绝
-	for _, h := range []crypto.Hash{crypto.MD5, crypto.SHA1, crypto.MD5SHA1} {
+	for _, h := range []crypto.Hash{crypto.MD5, crypto.MD5SHA1} {
 		cfg := &rootcrypto.AsymConfig{}
 		err := apply(cfg, rootcrypto.WithAsymHash(h))
 		assert.ErrorIs(t, err, rootcrypto.ErrInvalidAsymOption, "hash %v 应拒绝", h)
@@ -134,7 +141,9 @@ func TestAsymConfig_ThroughNewAsymmetric(t *testing.T) {
 	_, err = rootcrypto.NewAsymmetric(rootcrypto.ECDSA, rootcrypto.WithECDSACurve("P-224"))
 	assert.ErrorIs(t, err, rootcrypto.ErrInvalidAsymOption)
 
-	// 非法哈希 → 构造入口拒绝
+	// SHA-1 现经选项期放行（应用期白名单），由 SM2 消费侧拒绝
+	// （SM2 固定使用 SM3 摘要，不支持自定义签名哈希）
 	_, err = rootcrypto.NewAsymmetric(rootcrypto.SM2, rootcrypto.WithAsymHash(crypto.SHA1))
-	assert.ErrorIs(t, err, rootcrypto.ErrInvalidAsymOption)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "does not support custom asymmetric hash")
 }
