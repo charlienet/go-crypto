@@ -343,7 +343,11 @@
 //
 // HPKE（Hybrid Public Key Encryption）是 IETF RFC 9180 标准协议，提供
 // "给公钥持有者加密"的一站式 API。本实现基于 Cloudflare CIRCL 库，
-// 支持 DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM 组合。
+// 支持两种 cipher suite：
+//   - HPKE_X25519_HKDF_SHA256_AES_128_GCM：对应 RFC 9180 §A.1 官方测试向量
+//   - HPKE_X25519_HKDF_SHA256_AES_256_GCM：256 位对称密钥强度
+//
+// HPKESuite 字段已导出（KEM/KDF/AEAD），允许外部构造自定义 suite。
 //
 // HPKE 与 hyb1 的区别：
 //   - hyb1：go-crypto 自定义格式，支持 RSA-OAEP 和 X25519 两种 KEM，

@@ -3,8 +3,10 @@ package envelope
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"encoding/hex"
 	"testing"
 
+	"github.com/cloudflare/circl/hpke"
 	"github.com/stretchr/testify/require"
 )
 
@@ -312,4 +314,115 @@ func BenchmarkHPKEOpen(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = HPKEOpen(HPKE_X25519_HKDF_SHA256_AES_256_GCM, priv, enc, ciphertext, info)
 	}
+}
+
+// TestHPKE_AES128Variant 验证 AES-128-GCM 变体可用。
+func TestHPKE_AES128Variant(t *testing.T) {
+	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pub := priv.PublicKey()
+
+	plaintext := []byte("AES-128-GCM variant test")
+	info := []byte("aes128-context")
+
+	// 使用 AES-128-GCM suite
+	enc, ciphertext, err := HPKESeal(HPKE_X25519_HKDF_SHA256_AES_128_GCM, pub, plaintext, info)
+	require.NoError(t, err)
+	require.NotEmpty(t, enc)
+	require.NotEmpty(t, ciphertext)
+
+	// 解密验证
+	decrypted, err := HPKEOpen(HPKE_X25519_HKDF_SHA256_AES_128_GCM, priv, enc, ciphertext, info)
+	require.NoError(t, err)
+	require.Equal(t, plaintext, decrypted)
+}
+
+// TestHPKE_BothVariantsInteroperability 验证两个 suite 变体独立工作。
+func TestHPKE_BothVariantsInteroperability(t *testing.T) {
+	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pub := priv.PublicKey()
+
+	plaintext := []byte("cross-variant test")
+	info := []byte("shared-context")
+
+	// AES-128 加密
+	enc128, ct128, err := HPKESeal(HPKE_X25519_HKDF_SHA256_AES_128_GCM, pub, plaintext, info)
+	require.NoError(t, err)
+
+	// AES-256 加密
+	enc256, ct256, err := HPKESeal(HPKE_X25519_HKDF_SHA256_AES_256_GCM, pub, plaintext, info)
+	require.NoError(t, err)
+
+	// 各自解密
+	dec128, err := HPKEOpen(HPKE_X25519_HKDF_SHA256_AES_128_GCM, priv, enc128, ct128, info)
+	require.NoError(t, err)
+	require.Equal(t, plaintext, dec128)
+
+	dec256, err := HPKEOpen(HPKE_X25519_HKDF_SHA256_AES_256_GCM, priv, enc256, ct256, info)
+	require.NoError(t, err)
+	require.Equal(t, plaintext, dec256)
+
+	// 交叉解密应失败（suite 不匹配）
+	_, err = HPKEOpen(HPKE_X25519_HKDF_SHA256_AES_256_GCM, priv, enc128, ct128, info)
+	require.Error(t, err, "AES-256 suite should not decrypt AES-128 ciphertext")
+
+	_, err = HPKEOpen(HPKE_X25519_HKDF_SHA256_AES_128_GCM, priv, enc256, ct256, info)
+	require.Error(t, err, "AES-128 suite should not decrypt AES-256 ciphertext")
+}
+
+// TestHPKE_RFC9180Vector 验证 RFC 9180 §A.1 官方测试向量（AES-128-GCM）。
+// 向量来源：https://www.rfc-editor.org/rfc/rfc9180#appendix-A.1
+func TestHPKE_RFC9180Vector(t *testing.T) {
+	// RFC 9180 §A.1 测试向量
+	// KEM: DHKEM(X25519, HKDF-SHA256) = 0x0020
+	// KDF: HKDF-SHA256 = 0x0001
+	// AEAD: AES-128-GCM = 0x0001
+	
+	// 接收方私钥（skRm）
+	skRm, err := hex.DecodeString("4612c550263fc8ad58375df3f557aac531d26850903e55a9f23f21d8534e8ac8")
+	require.NoError(t, err)
+	
+	// 临时公钥（enc）
+	enc, err := hex.DecodeString("37fda3567bdbd628e88668c3c8d7e97d1d1253b6d4ea6d44c150f741f1bf4431")
+	require.NoError(t, err)
+	
+	// info: "Ode on a Grecian Urn"
+	info, err := hex.DecodeString("4f6465206f6e2061204772656369616e2055726e")
+	require.NoError(t, err)
+	
+	// aad: "Count-0"
+	aad, err := hex.DecodeString("436f756e742d30")
+	require.NoError(t, err)
+	
+	// 明文: "Beauty is truth, truth beauty"
+	pt, err := hex.DecodeString("4265617574792069732074727574682c20747275746820626561757479")
+	require.NoError(t, err)
+	
+	// 密文（ct）
+	ct, err := hex.DecodeString("f938558b5d72f1a23810b4be2ab4f84331acc02fc97babc53a52ae8218a355a96d8770ac83d07bea87e13c512a")
+	require.NoError(t, err)
+	
+	// 使用 AES-128-GCM suite 解密
+	suite := HPKE_X25519_HKDF_SHA256_AES_128_GCM
+	
+	// 注意：RFC 向量的密文包含 AAD，但我们的 API 当前固定 aad=nil
+	// 这里直接调用 CIRCL 底层 API 验证向量
+	hpkeSuite, err := hpkeResolveSuite(suite)
+	require.NoError(t, err)
+	
+	kemScheme := hpke.KEM_X25519_HKDF_SHA256.Scheme()
+	skR, err := kemScheme.UnmarshalBinaryPrivateKey(skRm)
+	require.NoError(t, err)
+	
+	receiver, err := hpkeSuite.NewReceiver(skR, info)
+	require.NoError(t, err)
+	
+	opener, err := receiver.Setup(enc)
+	require.NoError(t, err)
+	
+	// 解密（带 AAD）
+	decrypted, err := opener.Open(ct, aad)
+	require.NoError(t, err)
+	require.Equal(t, pt, decrypted, "RFC 9180 §A.1 vector decryption should match")
 }

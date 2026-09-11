@@ -9,14 +9,20 @@ import (
 )
 
 // HPKESuite 标识 HPKE cipher suite（RFC 9180 §7）。
+// 字段已导出，允许外部构造自定义 suite（需确保 KEM/KDF/AEAD 组合有效）。
 type HPKESuite struct {
 	KEM  uint16 // DHKEM_X25519_HKDF_SHA256 = 0x0020
 	KDF  uint16 // HKDF_SHA256              = 0x0001
-	AEAD uint16 // AES_256_GCM              = 0x0002
+	AEAD uint16 // AES_128_GCM=0x0001; AES_256_GCM=0x0002
 }
 
-// HPKE_X25519_HKDF_SHA256_AES_256_GCM 预定义 suite（X25519-HKDF-SHA256 + AES-256-GCM）。
-var HPKE_X25519_HKDF_SHA256_AES_256_GCM = HPKESuite{0x0020, 0x0001, 0x0002}
+// 预定义 HPKE cipher suites（RFC 9180 §7.1）。
+var (
+	// HPKE_X25519_HKDF_SHA256_AES_128_GCM 对应 RFC 9180 §A.1 测试向量。
+	HPKE_X25519_HKDF_SHA256_AES_128_GCM = HPKESuite{0x0020, 0x0001, 0x0001}
+	// HPKE_X25519_HKDF_SHA256_AES_256_GCM 提供 256 位对称密钥强度。
+	HPKE_X25519_HKDF_SHA256_AES_256_GCM = HPKESuite{0x0020, 0x0001, 0x0002}
+)
 
 var (
 	// ErrHPKEUnsupportedSuite 不支持的 cipher suite。
@@ -26,6 +32,25 @@ var (
 	// ErrHPKEOpenFailed HPKE 开包失败。
 	ErrHPKEOpenFailed = errors.New("hpke: opening failed")
 )
+
+// hpkeResolveSuite 将 HPKESuite 转换为 CIRCL hpke.Suite。
+// 当前仅支持 X25519 KEM + HKDF-SHA256 KDF + AES-128/256-GCM AEAD。
+func hpkeResolveSuite(suite HPKESuite) (hpke.Suite, error) {
+	if suite.KEM != 0x0020 {
+		return hpke.Suite{}, ErrHPKEUnsupportedSuite
+	}
+	if suite.KDF != 0x0001 {
+		return hpke.Suite{}, ErrHPKEUnsupportedSuite
+	}
+	switch suite.AEAD {
+	case 0x0001:
+		return hpke.NewSuite(hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES128GCM), nil
+	case 0x0002:
+		return hpke.NewSuite(hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES256GCM), nil
+	default:
+		return hpke.Suite{}, ErrHPKEUnsupportedSuite
+	}
+}
 
 // HPKESeal Base 模式密封。
 //
@@ -37,21 +62,19 @@ var (
 //
 // 参数约束：
 //   - recipientPub 必须为 *ecdh.PublicKey 且曲线为 X25519
-//   - suite 必须为 HPKE_X25519_HKDF_SHA256_AES_256_GCM
+//   - suite 必须为 HPKE_X25519_HKDF_SHA256_AES_128_GCM 或 HPKE_X25519_HKDF_SHA256_AES_256_GCM
 //   - info 用于密钥调度上下文绑定，可为 nil（应用层应传递协议级上下文以防止跨协议攻击）
 func HPKESeal(suite HPKESuite, recipientPub *ecdh.PublicKey, plaintext, info []byte) (enc, ciphertext []byte, err error) {
-	// 校验 suite
-	if suite != HPKE_X25519_HKDF_SHA256_AES_256_GCM {
-		return nil, nil, ErrHPKEUnsupportedSuite
+	// 解析 suite
+	hpkeSuite, err := hpkeResolveSuite(suite)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// 校验密钥类型
 	if recipientPub == nil || recipientPub.Curve() != ecdh.X25519() {
 		return nil, nil, ErrHPKEUnsupportedKey
 	}
-
-	// 创建 CIRCL HPKE suite
-	hpkeSuite := hpke.NewSuite(hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES256GCM)
 
 	// 转换公钥：ecdh.PublicKey -> circl kem.PublicKey
 	kemScheme := hpke.KEM_X25519_HKDF_SHA256.Scheme()
@@ -91,20 +114,18 @@ func HPKESeal(suite HPKESuite, recipientPub *ecdh.PublicKey, plaintext, info []b
 //   - enc 必须为发送方输出的临时公钥（32 字节）
 //   - ciphertext 必须为发送方输出的密文
 //   - info 必须与密封时使用的 info 一致
-//   - suite 必须为 HPKE_X25519_HKDF_SHA256_AES_256_GCM
+//   - suite 必须为 HPKE_X25519_HKDF_SHA256_AES_128_GCM 或 HPKE_X25519_HKDF_SHA256_AES_256_GCM
 func HPKEOpen(suite HPKESuite, recipientPriv *ecdh.PrivateKey, enc, ciphertext, info []byte) ([]byte, error) {
-	// 校验 suite
-	if suite != HPKE_X25519_HKDF_SHA256_AES_256_GCM {
-		return nil, ErrHPKEUnsupportedSuite
+	// 解析 suite
+	hpkeSuite, err := hpkeResolveSuite(suite)
+	if err != nil {
+		return nil, err
 	}
 
 	// 校验密钥类型
 	if recipientPriv == nil || recipientPriv.Curve() != ecdh.X25519() {
 		return nil, ErrHPKEUnsupportedKey
 	}
-
-	// 创建 CIRCL HPKE suite
-	hpkeSuite := hpke.NewSuite(hpke.KEM_X25519_HKDF_SHA256, hpke.KDF_HKDF_SHA256, hpke.AEAD_AES256GCM)
 
 	// 转换私钥：ecdh.PrivateKey -> circl kem.PrivateKey
 	kemScheme := hpke.KEM_X25519_HKDF_SHA256.Scheme()
