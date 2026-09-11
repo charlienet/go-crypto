@@ -338,4 +338,125 @@
 // 接口（如 SealDEK/OpenDEK 拆分：仅封装 DEK 的信封 + 单独载荷解密入口，
 // 使"发送方仅加密小信封、收件人解密大文件"成为可能）预留为未来扩展，
 // 不在此版本实现——届时可演进为"hyb1 仅封 DEK，载荷段交由 fsb2 消费"。
+//
+// # HPKE 公钥信封（RFC 9180 Base 模式，v0.3.0 起）
+//
+// HPKE（Hybrid Public Key Encryption）是 IETF RFC 9180 标准协议，提供
+// "给公钥持有者加密"的一站式 API。本实现基于 Cloudflare CIRCL 库，
+// 支持 DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM 组合。
+//
+// HPKE 与 hyb1 的区别：
+//   - hyb1：go-crypto 自定义格式，支持 RSA-OAEP 和 X25519 两种 KEM，
+//     输出自描述信封（含 magic/version/算法标识）。
+//   - HPKE：RFC 9180 标准格式，仅 X25519 KEM，输出 enc(32B) ‖ ciphertext，
+//     适合跨库互操作（与其他 RFC 9180 实现兼容）。
+//
+// # HPKE 输出格式
+//
+// HPKESeal 返回两个独立切片：enc（32B 临时公钥）和 ciphertext（密文）。
+// 调用方需自行持久化 enc 以便接收方解密。若需自描述单条格式，请使用 hyb1。
+//
+// # 用法示例（HPKE）
+//
+//	package main
+//
+//	import (
+//		"crypto/ecdh"
+//		"crypto/rand"
+//		"fmt"
+//		"log"
+//
+//		"github.com/charlienet/go-crypto/envelope"
+//	)
+//
+//	func main() {
+//		// 收件人 X25519 密钥对
+//		priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		pub := priv.PublicKey()
+//
+//		// 加密
+//		suite := envelope.HPKE_X25519_HKDF_SHA256_AES_256_GCM
+//		enc, ciphertext, err := envelope.HPKESeal(suite, pub, []byte("机密数据"), []byte("上下文info"))
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		fmt.Printf("enc: %x, ciphertext: %x\n", enc, ciphertext)
+//
+//		// 解密
+//		plain, err := envelope.HPKEOpen(suite, priv, enc, ciphertext, []byte("上下文info"))
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		fmt.Printf("明文: %s\n", plain)
+//	}
+//
+// # ECIES 公钥信封（P-256，v0.3.0 起）
+//
+// ECIES（Elliptic Curve Integrated Encryption Scheme）基于 P-256 临时-静态
+// ECDH，适合需要 NIST 曲线兼容的场景。算法组合：
+//
+//	ephemeral ECDH P-256 → HKDF-SHA256(16B) → AES-128-GCM
+//
+// ECIES 与 hyb1/HKPE 的区别：
+//   - hyb1：go-crypto 自定义格式，支持 RSA/X25519，输出自描述信封。
+//   - HPKE：RFC 9180 标准，仅 X25519，适合跨库互操作。
+//   - ECIES：P-256 曲线，适合 NIST 合规场景（如 FIPS 140-2）。
+//
+// # ECIES 输出格式（冻结格式）
+//
+//	offset  size  field
+//	0       1     ephPubLen = 0x41 (65)
+//	1       65    ephPub（P-256 未压缩点：0x04 ‖ X(32B) ‖ Y(32B)）
+//	66      12    nonce（AES-GCM 随机 nonce）
+//	78      L     ciphertext（GCM 密文）
+//	78+L    16    tag（GCM 认证标签）
+//
+// 总长度：94 + len(plaintext) 字节。
+//
+// # 用法示例（ECIES）
+//
+//	package main
+//
+//	import (
+//		"crypto/ecdsa"
+//		"crypto/elliptic"
+//		"crypto/rand"
+//		"fmt"
+//		"log"
+//
+//		"github.com/charlienet/go-crypto/envelope"
+//	)
+//
+//	func main() {
+//		// 收件人 P-256 密钥对
+//		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		// 加密（可选 AAD 绑定上下文）
+//		sealed, err := envelope.ECIESSeal(&priv.PublicKey, []byte("机密数据"), []byte("上下文AAD"))
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		fmt.Printf("信封: %x\n", sealed)
+//
+//		// 解密（须传相同 AAD）
+//		plain, err := envelope.ECIESOpen(priv, sealed, []byte("上下文AAD"))
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		fmt.Printf("明文: %s\n", plain)
+//	}
+//
+// # 四种信封格式选型指南
+//
+//   - gcx1：共享密钥小报文（对称密钥、直接 GCM、35 字节开销）。
+//   - fsb2：大文件流式加密（对称密钥、分块 GCM、流式、头部自描述）。
+//   - hyb1：公钥信封（RSA/X25519 KEM + AES-GCM 载荷，go-crypto 自定义格式）。
+//   - HPKE：公钥信封（X25519 KEM，RFC 9180 标准，跨库互操作）。
+//   - ECIES：公钥信封（P-256 KEM，NIST 合规场景）。
 package envelope
