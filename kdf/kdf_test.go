@@ -128,21 +128,54 @@ func TestArgon2id_InvalidParams(t *testing.T) {
 	password := []byte("password")
 	salt := []byte("salt")
 
-	_, err := Argon2id(password, salt, 0, 64*1024, 4, 16)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "time must be positive")
+	// 表驱动病态组合：全部须在进入 argon2.IDKey 前被拦截返回 error（永不 panic）。
+	// 契约固化：x/crypto v0.54.0 的 IDKey 在 memory < 8*threads 时并不 panic，
+	// 而是静默产出非 RFC 标准密钥（参考实现 phc-winner-argon2 此时返回
+	// ARGON2_MEMORY_TOO_SMALL）——本包的 memory ≥ 8*threads 下界即为拦截该行为。
+	cases := []struct {
+		name        string
+		time        uint32
+		memory      uint32
+		threads     uint8
+		keyLen      int
+		wantErrSubs string
+	}{
+		{"time=0", 0, 64 * 1024, 4, 16, "time must be positive"},
+		{"memory=0", 3, 0, 4, 16, "memory must be positive"},
+		{"threads=0", 3, 64 * 1024, 0, 16, "threads must be positive"},
+		{"keyLen=0", 3, 64 * 1024, 4, 0, "keyLen must be positive"},
+		{"keyLen<0", 3, 64 * 1024, 4, -1, "keyLen must be positive"},
+		// memory < 8*threads 下界（原会静默产出非标准密钥）
+		{"mem1<thr8", 3, 1, 8, 32, "memory must be at least 8*threads"},
+		{"mem7<thr1", 3, 7, 1, 32, "memory must be at least 8*threads"},
+		{"mem31<thr4", 3, 31, 4, 32, "memory must be at least 8*threads"},
+		{"mem0_thr8", 1, 0, 8, 32, "memory must be positive"},
+		// 上界（防内存 DoS / 输出误用）
+		{"keyLen>1MiB", 1, 8, 1, 1<<30 - 1, "keyLen exceeds 1 MiB limit"},
+		{"mem>2GiB", 3, 1 << 22, 1, 32, "memory exceeds 2 GiB limit"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			// 无 panic 断言：固化"公开 API 永不 panic、以 error 表达失败"契约。
+			require.NotPanics(t, func() {
+				_, err = Argon2id(password, salt, tc.time, tc.memory, tc.threads, tc.keyLen)
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErrSubs)
+		})
+	}
+}
 
-	_, err = Argon2id(password, salt, 3, 0, 4, 16)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "memory must be positive")
+// TestArgon2id_KeyDProductionParams 固化 keyd 生产组合（64MiB/t=3/p=1）行为不变：
+// 该组合远低于本包上界（memory 1<<21 KiB、keyLen 1<<20 B），修复后仍须正常派生。
+func TestArgon2id_KeyDProductionParams(t *testing.T) {
+	password := []byte("password")
+	salt := []byte("some-salt-value")
 
-	_, err = Argon2id(password, salt, 3, 64*1024, 0, 16)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "threads must be positive")
-
-	_, err = Argon2id(password, salt, 3, 64*1024, 4, 0)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "keyLen must be positive")
+	key, err := Argon2id(password, salt, 3, 64*1024, 1, 32)
+	require.NoError(t, err)
+	assert.Len(t, key, 32)
 }
 
 func TestArgon2idDefault(t *testing.T) {

@@ -19,7 +19,7 @@ go get github.com/charlienet/go-crypto
 | [asym](./asym) | 非对称算法引擎（RSA、ECDSA、Ed25519、SM2） |
 | [agreement](./agreement) | 密钥协商引擎（ECDH、X25519、SM2） |
 | [keymgr](./keymgr) | 密钥对生成、编解码、落盘（PEM/Base64/Hex/Raw）、PBES2 私钥加密 |
-| [envelope](./envelope) | 高层信封格式：gcx1 自描述信封、fsb2 自描述文件容器（流式分块 AEAD）、hyb1 公钥混合加密信封（KEM+AEAD） |
+| [envelope](./envelope) | 高层信封格式：gcx1 自描述信封、fsb2 自描述文件容器（流式分块 AEAD）、hyb1 公钥混合加密信封（KEM+AEAD）、HPKE（RFC 9180 Base 模式，含 WithAAD 变体）、ECIES（P-256） |
 | [hash](./hash) | 哈希函数（MD5/SHA 系/SM3/Murmur3/XXHash/FNV） |
 | [hmac](./hmac) | HMAC 消息认证码（支持 SM3 等） |
 | [kdf](./kdf) | 密钥派生（HKDF、PBKDF2、Argon2id）、高层 DeriveKey 与 PHC 标准格式口令哈希（PasswordHash/PasswordVerify） |
@@ -34,7 +34,7 @@ go get github.com/charlienet/go-crypto
 - **密钥派生**：HKDF、PBKDF2、Argon2id
 - **口令哈希（PHC）**：`kdf.PasswordHash` 输出 PHC 标准格式（`$argon2id$v=19$m=...`），salt/参数/派生结果自包含存储；默认参数基线对齐 OWASP 2024（argon2id m=64MiB、t=3、p=4）
 - **密钥管理**：PKCS#8/PKCS#1、PEM 加密（PBES2）
-- **信封加密**：gcx1 自描述格式（密文自带算法标识）、fsb2 自描述文件容器（fsb1 演进格式，28 字节头部内嵌算法/baseNonce/明文总长，解密侧只收密钥）、hyb1 公钥混合加密信封（RSA-OAEP 或 X25519 临时-静态 ECDH 密钥封装 + AES-256-GCM/SM4-GCM 载荷）
+- **信封加密**：gcx1 自描述格式（密文自带算法标识）、fsb2 自描述文件容器（fsb1 演进格式，28 字节头部内嵌算法/baseNonce/明文总长，解密侧只收密钥）、hyb1 公钥混合加密信封（RSA-OAEP 或 X25519 临时-静态 ECDH 密钥封装 + AES-256-GCM/SM4-GCM 载荷）、HPKE 公钥信封（RFC 9180 Base 模式，X25519 + AES-128/256-GCM，`HPKESealWithAAD/HPKEOpenWithAAD` 支持 AEAD 层 aad 上下文绑定）、ECIES 公钥信封（P-256 临时-静态 ECDH + HKDF-SHA256 + AES-128-GCM，信道强度 128-bit，需 256-bit 包装强度请改用 HPKESealWithAAD AES-256-GCM suite 或 RSA-2048-OAEP）
 - **哈希/HMAC**：MD5、SHA-1/224/256/384/512、SM3、Murmur3、XXHash、FNV
 - **安全默认**：所有公开 API 不 panic；GCM 认证失败统一哨兵；密钥内存清零
 
@@ -284,8 +284,10 @@ need, err := kdf.PasswordNeedsRehash(ph, nil)
 
 ## 安全说明
 
+- 所有公开 API 不 panic，错误一律以 error 返回（含非法参数、认证失败等路径）
 - 默认拒绝不安全算法/模式（DES、3DES、ECB），需显式 `WithInsecureAlgorithms()` 才可启用
 - GCM 认证失败统一返回 `ErrAuthenticationFailed`；CBC/ECB 填充失败统一 `ErrInvalidPadding`（错误消息不含细节，防 padding oracle 判据）
+- 信封公钥封装强度指引：ECIES（P-256）封装的信道强度为 **128-bit**（HKDF 派生 16B 密钥 → AES-128-GCM），与被封装明文的熵无关；需要 256-bit 包装强度（如封装 32B 全熵密钥）的调用方应选择 `envelope.HPKESealWithAAD`（AES-256-GCM suite）或 RSA-2048-OAEP
 - 固定 IV/nonce 下同一密钥禁止加密多条消息（keystream 复用直接泄露明文）
 - 私钥内存清零；KeyPair 禁止经 gob/yaml 等序列化
 - 使用 `crypto/engines` 一键注册全部引擎

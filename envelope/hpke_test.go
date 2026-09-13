@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/cloudflare/circl/hpke"
 	"github.com/stretchr/testify/require"
 )
 
@@ -371,58 +370,103 @@ func TestHPKE_BothVariantsInteroperability(t *testing.T) {
 	require.Error(t, err, "AES-128 suite should not decrypt AES-256 ciphertext")
 }
 
-// TestHPKE_RFC9180Vector 验证 RFC 9180 §A.1 官方测试向量（AES-128-GCM）。
+// TestHPKE_RFC9180Vector 验证 RFC 9180 §A.1.1.1 官方测试向量（AES-128-GCM），
+// 全程经公开 API HPKEOpenWithAAD 端到端断言（不绕过封装层）。
 // 向量来源：https://www.rfc-editor.org/rfc/rfc9180#appendix-A.1
 func TestHPKE_RFC9180Vector(t *testing.T) {
-	// RFC 9180 §A.1 测试向量
+	// RFC 9180 §A.1.1 测试向量
 	// KEM: DHKEM(X25519, HKDF-SHA256) = 0x0020
 	// KDF: HKDF-SHA256 = 0x0001
 	// AEAD: AES-128-GCM = 0x0001
-	
+
 	// 接收方私钥（skRm）
-	skRm, err := hex.DecodeString("4612c550263fc8ad58375df3f557aac531d26850903e55a9f23f21d8534e8ac8")
+	skRmHex := "4612c550263fc8ad58375df3f557aac531d26850903e55a9f23f21d8534e8ac8"
+	skRm, err := hex.DecodeString(skRmHex)
 	require.NoError(t, err)
-	
+	priv, err := ecdh.X25519().NewPrivateKey(skRm)
+	require.NoError(t, err)
+
 	// 临时公钥（enc）
 	enc, err := hex.DecodeString("37fda3567bdbd628e88668c3c8d7e97d1d1253b6d4ea6d44c150f741f1bf4431")
 	require.NoError(t, err)
-	
+
 	// info: "Ode on a Grecian Urn"
 	info, err := hex.DecodeString("4f6465206f6e2061204772656369616e2055726e")
 	require.NoError(t, err)
-	
+
 	// aad: "Count-0"
 	aad, err := hex.DecodeString("436f756e742d30")
 	require.NoError(t, err)
-	
+
 	// 明文: "Beauty is truth, truth beauty"
 	pt, err := hex.DecodeString("4265617574792069732074727574682c20747275746820626561757479")
 	require.NoError(t, err)
-	
-	// 密文（ct）
+
+	// 密文（ct，seq0）
 	ct, err := hex.DecodeString("f938558b5d72f1a23810b4be2ab4f84331acc02fc97babc53a52ae8218a355a96d8770ac83d07bea87e13c512a")
 	require.NoError(t, err)
-	
-	// 使用 AES-128-GCM suite 解密
-	suite := HPKE_X25519_HKDF_SHA256_AES_128_GCM
-	
-	// 注意：RFC 向量的密文包含 AAD，但我们的 API 当前固定 aad=nil
-	// 这里直接调用 CIRCL 底层 API 验证向量
-	hpkeSuite, err := hpkeResolveSuite(suite)
+
+	// 经公开 API HPKEOpenWithAAD 端到端解密（AES-128-GCM suite）
+	decrypted, err := HPKEOpenWithAAD(HPKE_X25519_HKDF_SHA256_AES_128_GCM, priv, enc, ct, aad, info)
 	require.NoError(t, err)
-	
-	kemScheme := hpke.KEM_X25519_HKDF_SHA256.Scheme()
-	skR, err := kemScheme.UnmarshalBinaryPrivateKey(skRm)
+	require.Equal(t, pt, decrypted, "RFC 9180 §A.1.1.1 向量经公开 API 解密应逐字节一致")
+}
+
+// TestHPKE_RFC9180Vector_AADTamper 官方向量 aad 单比特翻转必须认证失败。
+func TestHPKE_RFC9180Vector_AADTamper(t *testing.T) {
+	skRm, err := hex.DecodeString("4612c550263fc8ad58375df3f557aac531d26850903e55a9f23f21d8534e8ac8")
 	require.NoError(t, err)
-	
-	receiver, err := hpkeSuite.NewReceiver(skR, info)
+	priv, err := ecdh.X25519().NewPrivateKey(skRm)
 	require.NoError(t, err)
-	
-	opener, err := receiver.Setup(enc)
+	enc, err := hex.DecodeString("37fda3567bdbd628e88668c3c8d7e97d1d1253b6d4ea6d44c150f741f1bf4431")
 	require.NoError(t, err)
-	
-	// 解密（带 AAD）
-	decrypted, err := opener.Open(ct, aad)
+	info, err := hex.DecodeString("4f6465206f6e2061204772656369616e2055726e")
 	require.NoError(t, err)
-	require.Equal(t, pt, decrypted, "RFC 9180 §A.1 vector decryption should match")
+	aad, err := hex.DecodeString("436f756e742d30")
+	require.NoError(t, err)
+	ct, err := hex.DecodeString("f938558b5d72f1a23810b4be2ab4f84331acc02fc97babc53a52ae8218a355a96d8770ac83d07bea87e13c512a")
+	require.NoError(t, err)
+
+	// aad 首字节翻转 1 bit
+	badAAD := make([]byte, len(aad))
+	copy(badAAD, aad)
+	badAAD[0] ^= 0x01
+
+	_, err = HPKEOpenWithAAD(HPKE_X25519_HKDF_SHA256_AES_128_GCM, priv, enc, ct, badAAD, info)
+	require.ErrorIs(t, err, ErrHPKEOpenFailed, "aad 单比特翻转必须认证失败")
+
+	// aad=nil（缺省 aad 的旧 API 路径）打开带 aad 的密文同样失败
+	_, err = HPKEOpen(HPKE_X25519_HKDF_SHA256_AES_128_GCM, priv, enc, ct, info)
+	require.ErrorIs(t, err, ErrHPKEOpenFailed, "aad=nil 无法打开绑定非空 aad 的官方向量")
+}
+
+// TestHPKESealWithAAD_NilVsEmpty nil aad 与空 aad 行为一致性固化。
+func TestHPKESealWithAAD_NilVsEmpty(t *testing.T) {
+	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pub := priv.PublicKey()
+
+	plaintext := []byte("nil vs empty aad")
+	info := []byte("ctx")
+
+	// 以 aad=nil 封装，用 aad=[]byte{} 打开：应成功（GCM 语义下二者等价）
+	enc, ct, err := HPKESealWithAAD(HPKE_X25519_HKDF_SHA256_AES_256_GCM, pub, plaintext, nil, info)
+	require.NoError(t, err)
+	dec, err := HPKEOpenWithAAD(HPKE_X25519_HKDF_SHA256_AES_256_GCM, priv, enc, ct, []byte{}, info)
+	require.NoError(t, err)
+	require.Equal(t, plaintext, dec)
+
+	// 反向：以 aad=[]byte{} 封装，用 aad=nil 打开：应成功
+	enc2, ct2, err := HPKESealWithAAD(HPKE_X25519_HKDF_SHA256_AES_256_GCM, pub, plaintext, []byte{}, info)
+	require.NoError(t, err)
+	dec2, err := HPKEOpenWithAAD(HPKE_X25519_HKDF_SHA256_AES_256_GCM, priv, enc2, ct2, nil, info)
+	require.NoError(t, err)
+	require.Equal(t, plaintext, dec2)
+
+	// 委托一致性：HPKESeal/HPKEOpen 与 HPKESealWithAAD(nil)/HPKEOpenWithAAD(nil) 互通
+	enc3, ct3, err := HPKESeal(HPKE_X25519_HKDF_SHA256_AES_256_GCM, pub, plaintext, info)
+	require.NoError(t, err)
+	dec3, err := HPKEOpenWithAAD(HPKE_X25519_HKDF_SHA256_AES_256_GCM, priv, enc3, ct3, nil, info)
+	require.NoError(t, err)
+	require.Equal(t, plaintext, dec3)
 }

@@ -8,6 +8,8 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/pem"
 	"strings"
 	"sync"
 	"testing"
@@ -146,7 +148,7 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 }
 
 // TestRSAWeakKeyRejected_ObjectPath：对象注入路径同样拒绝 <2048 位弱密钥
-//（与字符串路径策略对称，P1 修复）。
+// （与字符串路径策略对称，P1 修复）。
 func TestRSAWeakKeyRejected_ObjectPath(t *testing.T) {
 	weakKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
@@ -454,4 +456,106 @@ func TestRSA_WithPrivateKeyString_BackfillsPublicKey(t *testing.T) {
 	sig, err := s.Sign(msg)
 	require.NoError(t, err)
 	assert.True(t, s.Verify(msg, sig), "WithPrivateKey(string) 后同实例验签应通过（公钥自动派生）")
+}
+
+// ==================== RSA-OAEP 锚定 KAT（P1-2） ====================
+//
+// crypto/rsa.EncryptOAEP 随机化（OAEP 随机 seed）→ 密文不可固定，故锚定
+// Decrypt 方向：冻结一把 RSA-2048 私钥 PEM + OpenSSL 3.5.5 预生成的固定
+// 密文常量（权威向量已经 OpenSSL 与 Go crypto/rsa 双向实算验证一致），
+// 断言经 go-crypto RSA-OAEP 解密路径还原出期望明文。
+// OAEP 的 hash 选择/label（空 []byte{}）等线上格式行为若变更，本组用例必然破坏。
+
+// oaepKATPrivateKeyPEM 冻结的 RSA-2048 测试私钥（PKCS#8 PEM，仅供 KAT 使用，
+// 严禁用于任何生产/真实密钥场景）。
+const oaepKATPrivateKeyPEM = `-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCx3l2F3+BANubK
+zs54mIsC0tYQ+Bhe8NeXFYNmXR8+N2AidC/CtFVIGvRmvxi1bE6pfuBQqSpzIRkE
+7RMjNkxoRhi8Lm01iyCXrbmZJ+sl/P1s2UMBEbsRSlaAPUsk6F4KWfH+vEwCVmYr
+c4LGgJoYhNjUh/3nVYtabnLTXKEPFs8q2Pm5s/Y+DPYZJPFEXQbCM+Gw2v9VPBzl
+MDIUBkX0raW86z5N8dPCiD7Wk3vZlMPOY+ivVA7PjXtkSGX4/yct9hyuyk0ZaM/x
+1JsBjvmhheR4s47bV4aaJ2DraD38qOX3uraJZCwrm2X2+vO5tMET9Dlhd4q/V7tn
+gaeqqhKLAgMBAAECggEAA5BB7Wmz03WGIDAOgOoFdvQEZ+igjF5k41kB/e4Frzhq
+y6XqQwtb3gr0NI7FjvTxioHJOrR47j+OgcPCK2VuGHS3ECYZ+AWmjINlgYUEOAme
+hizAI+hYCBumKgGQXNfu8mQk7gaVu0JB38L7rsBq1ezrby6eTqEvHoux7zwe2e+B
+f2CpiJIGWqPpvoGmmXqENK6Ztn0WOZvBTH+tTWxO6z/UtO7hzOs1/VRjaWMbj81c
+FKiQbxbgARX+epno5QdNoUOWON8AYhZTqNz5s/xMQbvc3y/8fsL81VSxiM67rWiC
+yupfzaSDQTjEfHDW+OLxXO2IrjJjbilq7xS2za1rUQKBgQDbG/rkQLRnKkx77/Uk
+jfobJ3UZDWr3iwgtHQLoWjLOG31ZfJP8JHlf3jtq1slTp1hJc9fjHAMSWCSuzu/G
+KdIHxVPEAhutYP9KfmykLV+Si5U7qk7+e2gzaq2kmtSc+yw3Rhxwg1kVRC9KwfFB
+2XO6pfql7ffUca30QXZF0wwq0wKBgQDP0NW3pSX7vhtCgv4PkCYmcp5XV2/kK02w
+83c4vmLm393VKys/FM0WyLw1VavyNMlFgyuv2s+zW+sgTkzURObNzJz8wLiEmg2L
+EWfakLllhQ0zz/rzRn6Dq/X1u/RvpmXU01Dshw3Wzz3CdCVM7uTBC1anlf7oTeNG
+wkloAUw2aQKBgDU/pIaKLw2PWw0XsNTUaD7nJO8UsrU8JZ2JGmbLXON4DMuNmg1B
+8/lXccsyLbVVyv/21jWMXja8ExYklmLrUO6whv3woTdOhlxdQxvXJw3fPEJGznHM
+HfO47kA9nIQWCpXYRRsW4LRpYLDjVzVwmk52/eYLYhpQEj11F0A63Q8fAoGAQ51T
+29N830KERgiutsuUzg+e2xYUzq0UMw2T7b9sGGggGfpYsMaIz+/x5HyCXGS2U8qQ
+zT+pMlcm0jUHpEzit3TqYwYlQueInoXEP4W0/IXkvMXfhYWbJiYt+Yz0w9rk6PD0
+NHDgnNKC6qC1fil//hs9T3trG5Qz7VLLZW5+qHkCgYEAwEezQ3dxmmbT0o6UpsWh
+GWT4d7/Tuxs38dEz1M/N8l+3rkGTbs58XPUco1zG4x9CGiq7ed6NI7wsf0oYrE2I
+TpHvp4y4h15WtrbfHFRH5cGAzJ767/nyUsNk6wjKONgZzHY1JBY3vq8v38/IzXJs
+Kfpc1+fPFP0j7YbiiVDsB+Q=
+-----END PRIVATE KEY-----`
+
+// oaepKATPlaintextHex 期望明文（24 字节 "go-crypto RSA-OAEP KAT 2026"）的 hex。
+const oaepKATPlaintextHex = "676f2d63727970746f205253412d4f414550204b41542032303236"
+
+// oaepKATCiphertextSHA256Hex OAEP-SHA256 固定密文（256 字节，OpenSSL 预生成）。
+const oaepKATCiphertextSHA256Hex = "82159dad9ccb7b55c708c59879931084a2d85b900f7768100adfff044eceeeeda9b9cc2c0992b2f3c0bd1c1c0decd57395eabf166aeeb6b53a825175c6787bfce12958ab2ac510947e51e297a909aad23602cdf5ff1fbc18416578ed9633812774e135879cb6ef7d8593ec5955ec5915dfa62e27dd002f4b46f34386dad9e5322a7cb674a8a68b7b29c8f3b62e0ecc871f6fcdfe548546f4e4c3a355d2c95ab22f71b9c0b6e4ffafdf7a61159e7ce1fb3fcd4426f30458b4f516c5736b6810a986bc1925430d448625e87d5a061d4cf2bea87aafc57ed9bade152dff9a96f2332a9d1e19131ca2f3f30788b0c915aeee019ba0d088741ba3c981cdd549c3dd22"
+
+// oaepKATCiphertextSHA1Hex OAEP-SHA1 固定密文（256 字节，OpenSSL 预生成，遗留互操作覆盖）。
+const oaepKATCiphertextSHA1Hex = "684c821e22f050752fcebae0767716753af3ad538b700b237636c605c0c4b45d800561d8c3daf986b60f7cf62516a451d0f0f52e4ccbc442e18f205fa79647765ddb98fda9c9ce05ac6784dde5c74740065f7b87d4af6791faf2e7b8ebd82bf9c8c827995d29498f103495a22eadecda430d6a7a282104b97acd509742949d18471d2e0ad00c1a482cb00a501e9f413acb44eea1307b47bdfceb8c079d594e4522bbbb4c54214d9d7ec9f8ab3a1c82537467c3271e006965ae5a59deadfe57e84dc4c8f79b39cf7b5ca2960d22ed504a3221052c87e1d7cdcd52c4777782b0d895303f87d5256b8488194e888177bbb4df2d63562af279dfab8cc6aecf08d802"
+
+// oaepKATPrivateKey 解析冻结的 PKCS#8 测试私钥。
+func oaepKATPrivateKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	block, _ := pem.Decode([]byte(oaepKATPrivateKeyPEM))
+	require.NotNil(t, block, "冻结私钥 PEM 解码失败")
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	require.NoError(t, err)
+	prk, ok := key.(*rsa.PrivateKey)
+	require.True(t, ok, "冻结密钥不是 RSA 私钥")
+	require.Equal(t, 2048, prk.N.BitLen(), "冻结密钥应为 2048 位")
+	return prk
+}
+
+// TestRSA_OAEP_KAT_SHA256：OAEP-SHA256 锚定向量。默认构造（hash=SHA256）的
+// Decrypt 内部为 rsa.DecryptOAEP(sha256.New(), label=[]byte{})，与 Encrypt
+// 的 EncryptOAEP 参数对齐，应还原出期望明文。
+func TestRSA_OAEP_KAT_SHA256(t *testing.T) {
+	prk := oaepKATPrivateKey(t)
+
+	ct, err := hex.DecodeString(oaepKATCiphertextSHA256Hex)
+	require.NoError(t, err)
+	want, err := hex.DecodeString(oaepKATPlaintextHex)
+	require.NoError(t, err)
+
+	dec, err := rootcrypto.NewAsymmetric(rootcrypto.RSA, rootcrypto.WithPrivateKeyObject(prk))
+	require.NoError(t, err)
+
+	pt, err := dec.Decrypt(ct)
+	require.NoError(t, err)
+	assert.Equal(t, want, []byte(pt), "OAEP-SHA256 KAT：解密结果与期望明文不符")
+}
+
+// TestRSA_OAEP_KAT_SHA1：OAEP-SHA1 锚定向量（遗留互操作覆盖）。SHA-1 属
+// 不安全摘要，须经 WithAsymInsecureAlgorithms() 构造期闸门显式 opt-in。
+func TestRSA_OAEP_KAT_SHA1(t *testing.T) {
+	prk := oaepKATPrivateKey(t)
+
+	ct, err := hex.DecodeString(oaepKATCiphertextSHA1Hex)
+	require.NoError(t, err)
+	want, err := hex.DecodeString(oaepKATPlaintextHex)
+	require.NoError(t, err)
+
+	dec, err := rootcrypto.NewAsymmetric(rootcrypto.RSA,
+		rootcrypto.WithPrivateKeyObject(prk),
+		rootcrypto.WithAsymHash(crypto.SHA1),
+		rootcrypto.WithAsymInsecureAlgorithms(),
+	)
+	require.NoError(t, err)
+
+	pt, err := dec.Decrypt(ct)
+	require.NoError(t, err)
+	assert.Equal(t, want, []byte(pt), "OAEP-SHA1 KAT：解密结果与期望明文不符")
 }

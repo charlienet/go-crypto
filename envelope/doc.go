@@ -360,6 +360,16 @@
 // HPKESeal 返回两个独立切片：enc（32B 临时公钥）和 ciphertext（密文）。
 // 调用方需自行持久化 enc 以便接收方解密。若需自描述单条格式，请使用 hyb1。
 //
+// # HPKE AAD 绑定（v0.4.0 起）
+//
+// HPKESealWithAAD / HPKEOpenWithAAD 将 RFC 9180 §6.1 单发射 API 的 aad
+// 一等参数透传给底层 AEAD：aad 参与认证但不入密文，打开时须传逐字节一致
+// 的值，否则返回 ErrHPKEOpenFailed。可用于把密文与外部上下文（如
+// version‖key_id）在 AEAD 层绑定，防止跨上下文混用。
+// HPKESeal/HPKEOpen 保留为 aad=nil 的薄委托，行为完全不变。
+// 注意：本 API 签名中 aad 位于 info 之前，与底层 circl Open(ct, aad) 的
+// 参数顺序不同，以本包签名为准。
+//
 // # 用法示例（HPKE）
 //
 //	package main
@@ -403,6 +413,11 @@
 // ECDH，适合需要 NIST 曲线兼容的场景。算法组合：
 //
 //	ephemeral ECDH P-256 → HKDF-SHA256(16B) → AES-128-GCM
+//
+// ⚠️ 信道强度声明：ECIES 封装的信道强度为 128-bit（HKDF 派生 16B 密钥 →
+// AES-128-GCM），与被封装明文的熵无关。需要 256-bit 包装强度（如封装
+// 32B 全熵密钥）的调用方应选择 HPKESealWithAAD（AES-256-GCM）或
+// RSA-2048-OAEP。
 //
 // ECIES 与 hyb1/HKPE 的区别：
 //   - hyb1：go-crypto 自定义格式，支持 RSA/X25519，输出自描述信封。

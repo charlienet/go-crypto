@@ -180,6 +180,18 @@
 //
 //	envelope.Encrypt(crypto.AES128.String(), key, plaintext)
 //
+// # v0.3 能力段（envelope 公钥信封）
+//
+//   - HPKE（RFC 9180 Base 模式）：X25519 + HKDF-SHA256 + AES-128/256-GCM。
+//     HPKESeal/HPKEOpen 与带 AEAD 上下文绑定的 HPKESealWithAAD/
+//     HPKEOpenWithAAD（aad 参与认证绑定，RFC 9180 §6.1；签名中 aad 位于
+//     info 之前，与底层 circl Open(ct, aad) 参数顺序不同）。
+//   - ECIES（P-256）：ECIESSeal/ECIESOpen，临时-静态 ECDH + HKDF-SHA256 +
+//     AES-128-GCM。⚠️ 封装的信道强度为 128-bit（HKDF 派生 16B 密钥 →
+//     AES-128-GCM），与被封装明文的熵无关。需要 256-bit 包装强度（如封装
+//     32B 全熵密钥）的调用方应选择 HPKESealWithAAD（AES-256-GCM）或
+//     RSA-2048-OAEP。
+//
 // # Examples
 //
 // ⚠️ 重要提示：使用加密功能前必须导入对应的引擎子包。

@@ -4,7 +4,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestECIESRoundTrip(t *testing.T) {
@@ -336,4 +339,65 @@ func BenchmarkECIESOpen(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// ==================== P1-6 错误分类 ====================
+
+// TestECIESOpenInvalidEphPubEncoding 构造"ephPubLen 合法但点编码非法"的信封，
+// 断言返回 ErrECIESInvalidEphPub（NewPublicKey 解析失败路径），且该错误
+// 不是 ErrECIESAgreementFailed（两类错误已区分，errors.Is 兼容）。
+func TestECIESOpenInvalidEphPubEncoding(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	// 以真实信封为底，把 ephPub（偏移 1..65）替换为明显非曲线点的编码：
+	// 前缀 0x04 + 全零 X + 全零 Y（不满足 P-256 曲线方程，也不是无穷远点）。
+	sealed, err := ECIESSeal(&priv.PublicKey, []byte("payload"), nil)
+	require.NoError(t, err)
+	broken := make([]byte, len(sealed))
+	copy(broken, sealed)
+	broken[1] = 0x04
+	for i := 2; i < 1+65; i++ {
+		broken[i] = 0x00
+	}
+
+	_, err = ECIESOpen(priv, broken, nil)
+	require.ErrorIs(t, err, ErrECIESInvalidEphPub, "非曲线点编码应报 InvalidEphPub")
+	require.NotErrorIs(t, err, ErrECIESAgreementFailed,
+		"解析失败路径不得混入 AgreementFailed（P1-6 分类语义）")
+
+	// 前缀非法（非 0x04/0x02/0x03）同样走解析失败路径
+	broken2 := make([]byte, len(sealed))
+	copy(broken2, sealed)
+	broken2[1] = 0x07
+	_, err = ECIESOpen(priv, broken2, nil)
+	require.ErrorIs(t, err, ErrECIESInvalidEphPub)
+	require.NotErrorIs(t, err, ErrECIESAgreementFailed)
+}
+
+// TestECIESAgreementFailedSentinel 断言新增哨兵的存在性与独立性。
+//
+// 诚实说明：ErrECIESAgreementFailed 对应 ecdhPriv.ECDH(ephPub) 的防御性
+// 错误分支。P-256 是素阶曲线，NewPublicKey 已拒绝非曲线点与恒等点，
+// 标准库输入下"点合法但 ECDH 失败"不可构造——该分支为不可达防御路径，
+// 因此无法（也不应伪造）端到端触发用例；本测试固化哨兵语义边界：
+// 与既有错误集合两两不同、errors.Is 互不误匹配。
+func TestECIESAgreementFailedSentinel(t *testing.T) {
+	require.Error(t, ErrECIESAgreementFailed)
+	require.Equal(t, "ecies: ECDH agreement failed", ErrECIESAgreementFailed.Error())
+
+	sentinels := []error{ErrECIESTooShort, ErrECIESInvalidCurve, ErrECIESInvalidEphPub, ErrECIESAuthFailed}
+	for _, e := range sentinels {
+		require.NotErrorIs(t, ErrECIESAgreementFailed, e, "AgreementFailed 不得与既有哨兵混淆")
+		require.NotErrorIs(t, e, ErrECIESAgreementFailed, "既有哨兵不得被 AgreementFailed 匹配")
+	}
+
+	// 认证失败路径仍归 ErrECIESAuthFailed（不受新哨兵影响）
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	sealed, err := ECIESSeal(&priv.PublicKey, []byte("payload"), []byte("aad"))
+	require.NoError(t, err)
+	_, err = ECIESOpen(priv, sealed, []byte("wrong-aad"))
+	require.ErrorIs(t, err, ErrECIESAuthFailed)
+	require.False(t, errors.Is(err, ErrECIESAgreementFailed))
 }

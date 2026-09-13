@@ -29,6 +29,16 @@ import (
 //   - 内存使用量根据硬件性能调整，建议 ≥ 64MB
 //   - Salt 必须唯一且随机
 //
+// 参数边界：
+//   - 下界：memory 必须 ≥ 8*threads（KiB）。x/crypto 的 argon2.IDKey 在该下界被
+//     违反时既不 panic 也不报错，而是静默产出无法被任何标准 Argon2 复现的非 RFC
+//     密钥（initHash 用未 clamp 的原始 memory 编码 H0，实际内存却按 clamp 后分配），
+//     故本函数前置拒绝。
+//   - 上界：memory ≤ 1<<21 KiB（2 GiB）、keyLen ≤ 1<<20 字节（1 MiB），超出即拒绝，
+//     防误用与内存 DoS。超大参数由调用方按输入信任域自行限制；本函数对 RFC 下界与
+//     内存/输出上界做前置拒绝，不使用 recover。
+//   - 失败一律以 error 返回，本函数永不 panic。
+//
 // 示例：
 //
 //	key, _ := kdf.Argon2id([]byte("password"), salt, 3, 64*1024, 4, 16)
@@ -45,6 +55,19 @@ func Argon2id(password, salt []byte, time, memory uint32, threads uint8, keyLen 
 	}
 	if keyLen <= 0 {
 		return nil, errors.New("kdf: keyLen must be positive")
+	}
+	// 下界：memory 必须 ≥ 8*threads。x/crypto argon2.IDKey 在 memory < 8*threads
+	// 时不 panic 也不报错，而是静默产出非 RFC 标准、无法被标准 Argon2 复现的密钥，
+	// 故必须在此前置拒绝。用 uint64 计算 8*threads 防溢出。
+	if uint64(memory) < uint64(8)*uint64(threads) {
+		return nil, errors.New("kdf: memory must be at least 8*threads (KiB)")
+	}
+	// 上界：防误用与内存 DoS。memory ≤ 1<<21 KiB（2 GiB），keyLen ≤ 1<<20 字节（1 MiB）。
+	if memory > 1<<21 {
+		return nil, errors.New("kdf: memory exceeds 2 GiB limit")
+	}
+	if keyLen > 1<<20 {
+		return nil, errors.New("kdf: keyLen exceeds 1 MiB limit")
 	}
 
 	return argon2.IDKey(password, salt, time, memory, threads, uint32(keyLen)), nil
