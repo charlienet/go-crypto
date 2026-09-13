@@ -229,7 +229,7 @@ func WithBase64Password(base64Encoded string) Option {
 func WithIV(iv []byte) Option {
 	return func(cfg *Config) {
 		cfg.IV = append([]byte(nil), iv...)
-		cfg.IVError = nil  // 清除前者的解码错误
+		cfg.IVError = nil // 清除前者的解码错误
 	}
 }
 
@@ -244,7 +244,7 @@ func WithIV(iv []byte) Option {
 func WithNonce(nonce []byte) Option {
 	return func(cfg *Config) {
 		cfg.Nonce = append([]byte(nil), nonce...)
-		cfg.NonceError = nil  // 清除前者的解码错误
+		cfg.NonceError = nil // 清除前者的解码错误
 	}
 }
 

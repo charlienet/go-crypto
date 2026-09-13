@@ -9,15 +9,15 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/charlienet/go-utils/bytex"
 	"github.com/charlienet/go-crypto"
+	"github.com/charlienet/go-utils/bytex"
 	"github.com/emmansun/gmsm/sm4"
 )
 
 // supported 对称算法表：算法键与根包注册表键一致（共 6 键，规范名；
 // 泛名 "AES" 经 NormalizeAlgorithm 归一为 "AES-128" 后查表）。
 // creator 记录底层块构造器、密钥/IV 长度元数据与不安全算法标记
-//（CipherFactory.KeySize/IVSize/Insecure 由此派生）。
+// （CipherFactory.KeySize/IVSize/Insecure 由此派生）。
 var supported = map[string]*creator{
 	"SM4":     {sm4.NewCipher, sm4.BlockSize, sm4.BlockSize, false},
 	"AES-128": {aes.NewCipher, aes.BlockSize, aes.BlockSize, false},

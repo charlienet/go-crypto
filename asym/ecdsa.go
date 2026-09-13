@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/charlienet/go-utils/bytex"
 	rootcrypto "github.com/charlienet/go-crypto"
+	"github.com/charlienet/go-utils/bytex"
 )
 
 type ecdsa_algo struct {

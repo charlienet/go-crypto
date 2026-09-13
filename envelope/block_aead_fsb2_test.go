@@ -127,7 +127,7 @@ func TestFsb2StreamingRead(t *testing.T) {
 }
 
 // TestFsb2TamperHeader 头篡改：逐字节翻转头部 28 字节，解密必须失败
-//（构造期哨兵错误或 Read 期 GCM AAD 认证失败均可，绝不能成功解密）。
+// （构造期哨兵错误或 Read 期 GCM AAD 认证失败均可，绝不能成功解密）。
 func TestFsb2TamperHeader(t *testing.T) {
 	plain := randBytes(t, 5000) // 2 块
 	ct := fsb2Encrypt(t, plain, "SM4", testKey)

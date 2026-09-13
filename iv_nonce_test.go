@@ -168,7 +168,7 @@ func TestIV_ClearErrorOnByteOverride(t *testing.T) {
 	}
 
 	pt := []byte("test clear error")
-	
+
 	// 使用无效 hex IV，然后用有效的字节 IV 覆盖，应该成功
 	ct, err := Encrypt(AES128, CBC, pt,
 		WithKey(key), WithHexIV("invalid-hex"), WithIV(iv))
@@ -189,7 +189,7 @@ func TestNonce_ClearErrorOnByteOverride(t *testing.T) {
 	}
 
 	pt := []byte("test clear error")
-	
+
 	// 使用无效 base64 nonce，然后用有效的字节 nonce 覆盖，应该成功
 	ct, err := Encrypt(AES128, GCM, pt,
 		WithKey(key), WithBase64Nonce("invalid-base64"), WithNonce(nonce))

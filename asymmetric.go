@@ -160,7 +160,9 @@ var ecdsaCurveWhitelist = map[string]struct{}{
 
 // normalizeCurveName 将曲线名归一为规范形式（去连字符、大写，
 // 如 "p-256"/"P_256" → "P256"）；空串原样返回（表示走默认值）。
-func normalizeCurveName(curve string) string { return strings.ToUpper(strings.ReplaceAll(curve, "-", "")) }
+func normalizeCurveName(curve string) string {
+	return strings.ToUpper(strings.ReplaceAll(curve, "-", ""))
+}
 
 // WithRSAKeyBits 设置 RSA 密钥位数（默认 2048）。
 // 显式传值必须 >=2048（小于 2048 已在选项应用期拒绝，返回

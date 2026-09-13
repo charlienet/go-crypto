@@ -706,7 +706,7 @@ func TestDecryptPBES2_SHA1PRF(t *testing.T) {
 
 // TestDecryptPBES2_KeyLengthMismatch 构造 KeyLength=16 + AES-256-CBC OID 的
 // 恶意 DER：显式 KeyLength 与加密方案密钥长度不符，解密路径必须拒绝
-//（防弱化降级，省略 KeyLength 时默认 32 不受影响）。
+// （防弱化降级，省略 KeyLength 时默认 32 不受影响）。
 func TestDecryptPBES2_KeyLengthMismatch(t *testing.T) {
 	salt := []byte("0123456789abcdef")
 	iv := make([]byte, 16)

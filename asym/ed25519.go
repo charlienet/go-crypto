@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/charlienet/go-utils/bytex"
 	rootcrypto "github.com/charlienet/go-crypto"
+	"github.com/charlienet/go-utils/bytex"
 )
 
 type ed25519_algo struct {

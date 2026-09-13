@@ -17,10 +17,10 @@ type Config struct {
 	Padding    Padding // WithPadding()：ECB/CBC 填充；nil 时缺省 PKCS7
 
 	// ---- 模式化 API 选项（Encrypt/Decrypt 专用）----
-	IV    []byte // WithIV()：外部 IV/计数器；nil 表示随机生成并前置
-	Nonce []byte // WithNonce()：外部 GCM nonce；nil 表示随机生成并前置
-	IVError   error  // hex/base64 IV 解码失败
-	NonceError error // hex/base64 nonce 解码失败
+	IV         []byte // WithIV()：外部 IV/计数器；nil 表示随机生成并前置
+	Nonce      []byte // WithNonce()：外部 GCM nonce；nil 表示随机生成并前置
+	IVError    error  // hex/base64 IV 解码失败
+	NonceError error  // hex/base64 nonce 解码失败
 
 	// ---- 密钥源（多个选项按调用顺序覆盖）----
 	Key      []byte // 解析出的密钥字节（多个 With* 选项按调用顺序覆盖）

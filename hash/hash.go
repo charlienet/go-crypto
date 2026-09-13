@@ -184,8 +184,6 @@ func Fnv64(msg []byte) uint64 {
 	return h.Sum64()
 }
 
-
-
 func sum(f func() hash.Hash, msg []byte) bytex.Bytes {
 	h := f()
 

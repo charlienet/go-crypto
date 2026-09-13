@@ -97,7 +97,7 @@ func TestECDH_WithPrivateKey_ECDHType(t *testing.T) {
 }
 
 // TestX25519_PKCS8RoundTrip #18 对称性：X25519 同样可 PKCS#8 往返
-//（X25519 曲线回读为 *ecdh.PrivateKey，与 NIST 曲线回读类型不同），
+// （X25519 曲线回读为 *ecdh.PrivateKey，与 NIST 曲线回读类型不同），
 // 注回后与对端派生一致。
 func TestX25519_PKCS8RoundTrip(t *testing.T) {
 	alice, err := crypto.NewKeyAgreement(crypto.X25519)

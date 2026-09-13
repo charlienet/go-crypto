@@ -42,12 +42,12 @@ const (
 // header 入 AAD 防篡改做法），块号以 BE64 追加在后。
 const (
 	fsb2Magic      = "GOFSB2"
-	fsb2Version    = 0x00       // 版本 0：首个冻结版本
-	fsb2AlgIDLen   = 1          // 算法标识字节长度
-	fsb2NonceLen   = 12         // baseNonce 长度（与 blockNonceSize 一致）
-	fsb2SizeLen    = 8          // 明文总长（uint64 LE）
+	fsb2Version    = 0x00                                                           // 版本 0：首个冻结版本
+	fsb2AlgIDLen   = 1                                                              // 算法标识字节长度
+	fsb2NonceLen   = 12                                                             // baseNonce 长度（与 blockNonceSize 一致）
+	fsb2SizeLen    = 8                                                              // 明文总长（uint64 LE）
 	fsb2HeaderLen  = len(fsb2Magic) + 1 + fsb2AlgIDLen + fsb2NonceLen + fsb2SizeLen // = 28
-	fsb2SizeOffset = len(fsb2Magic) + 1 + fsb2AlgIDLen + fsb2NonceLen              // totalSize 字段偏移 = 20
+	fsb2SizeOffset = len(fsb2Magic) + 1 + fsb2AlgIDLen + fsb2NonceLen               // totalSize 字段偏移 = 20
 
 	// fsb2 算法标识字节（查表映射 symmetric 注册键，复用 gcx1 全局 ID 语义）。
 	fsb2AlgIDSM4    byte = 0x01

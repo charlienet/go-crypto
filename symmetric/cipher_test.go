@@ -416,7 +416,7 @@ func TestKeySizeIVSize(t *testing.T) {
 		wantKey int
 		wantIV  int
 	}{
-		{"AES", 16, 16},     // 泛名归一到 AES-128
+		{"AES", 16, 16}, // 泛名归一到 AES-128
 		{"AES-128", 16, 16},
 		{"AES-192", 24, 16},
 		{"AES-256", 32, 16},

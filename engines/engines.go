@@ -25,8 +25,8 @@
 package engines
 
 import (
-	_ "github.com/charlienet/go-crypto/symmetric"
-	_ "github.com/charlienet/go-crypto/asym"
 	_ "github.com/charlienet/go-crypto/agreement"
+	_ "github.com/charlienet/go-crypto/asym"
 	_ "github.com/charlienet/go-crypto/keymgr"
+	_ "github.com/charlienet/go-crypto/symmetric"
 )

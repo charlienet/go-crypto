@@ -33,6 +33,7 @@ Exported Functions:
   - New(string) (*HashComparer, error): Creates a stateless hash descriptor whose methods are: Digest(msg) for one-shot digests, Compare(msg, target) for constant-time digest comparison, From(reader) for streaming digests, CompareFrom(reader, target) for streaming constant-time comparison, and Hasher() for a fresh standard-library incremental hash.Hash
 
 Examples:
+
 	// Calculate SHA-256 hash
 	hashValue := hash.Sha256([]byte("hello world"))
 	fmt.Printf("SHA-256: %x\n", hashValue.Bytes())

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charlienet/go-utils/bytex"
 	"github.com/charlienet/go-crypto"
+	"github.com/charlienet/go-utils/bytex"
 
 	_ "github.com/charlienet/go-crypto/agreement"
 	_ "github.com/charlienet/go-crypto/asym"
@@ -145,8 +145,8 @@ func TestProtocol_CustomExtension(t *testing.T) {
 }
 
 // TestProtocol_Engines Engines() 汇总清单须包含四个子包注册的全部键：
-	// 非对称（asym）、密钥协商（agreement）、密钥对生成（keymgr，与 asym 同键去重）
-	// 与对称（symmetric，6 算法键 + 6 模式键；泛名 "AES" 已移除，归一落 "AES-128"）。
+// 非对称（asym）、密钥协商（agreement）、密钥对生成（keymgr，与 asym 同键去重）
+// 与对称（symmetric，6 算法键 + 6 模式键；泛名 "AES" 已移除，归一落 "AES-128"）。
 func TestProtocol_Engines(t *testing.T) {
 	engines := crypto.Engines()
 	for _, want := range []string{

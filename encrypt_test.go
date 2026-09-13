@@ -230,7 +230,7 @@ func TestKeySources(t *testing.T) {
 	got, err := crypto.Decrypt(alg, mode, ct, crypto.WithKeyPassword(pw))
 	assert.NoError(t, err)
 	assert.Equal(t, pt, got)
-	
+
 	// 用 WithBase64Password 覆盖 WithHexPassword
 	b64 := base64.StdEncoding.EncodeToString(key)
 	ct2, err := crypto.Encrypt(alg, mode, pt, crypto.WithHexPassword(hex.EncodeToString([]byte("wrong_key"))), crypto.WithBase64Password(b64))

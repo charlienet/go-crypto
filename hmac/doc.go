@@ -34,6 +34,7 @@ Note on Digest: HMacComparer.Digest(msg) computes the HMAC of a whole message; i
 the "append current digest" semantics of the standard library hash.Hash.Sum(b []byte).
 
 Examples:
+
 	// Calculate HMAC-SHA256
 	key := []byte("my-secret-key")
 	message := []byte("hello world")
@@ -59,6 +60,7 @@ Examples:
 	isValid := comparer.Compare(message, mac)
 
 Streaming Computation:
+
 	// 流式计算（适合大文件/大数据量，无需一次性读入内存）：
 	// f, _ := os.Open("bigfile.bin")
 	// defer f.Close()
@@ -83,56 +85,59 @@ Streaming Computation:
 	fmt.Println("authenticated:", ok)
 
 Concurrency:
+
   - All exported functions are pure or read from immutable registries, so they are
     safe to call concurrently from multiple goroutines. An HMacComparer descriptor is
     likewise shareable: Digest/Compare/From/CompareFrom/Hasher never mutate instance state and
     derive fresh objects—Hasher/From return a new incremental object per call—but
     never use the descriptor concurrently with Zero. The library deliberately
     provides no async/concurrent variants: goroutine ownership stays with the caller.
+
   - Offloading a call to a goroutine: the result channel MUST be buffered with
     capacity 1. If the context is cancelled while the computation is still running,
     the background goroutine can then deliver its result and exit, instead of
     blocking forever on an unbuffered send that nobody will ever receive (leak).
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case res := <-ch: // ch := make(chan result, 1); the worker sends exactly once
-		return res.err
-	}
+    select {
+    case <-ctx.Done():
+    return ctx.Err()
+    case res := <-ch: // ch := make(chan result, 1); the worker sends exactly once
+    return res.err
+    }
 
   - Cancellation boundary: the stream API (Md5From ... Sm3From) reads via io.Copy,
     which does not observe context.Context. To stop mid-stream, wrap the reader so
     Read fails once the context is done:
 
-	type ctxReader struct {
-		ctx context.Context
-		r   io.Reader
-	}
+    type ctxReader struct {
+    ctx context.Context
+    r   io.Reader
+    }
 
-	func (c *ctxReader) Read(p []byte) (int, error) {
-		if err := c.ctx.Err(); err != nil {
-			return 0, err
-		}
-		return c.r.Read(p)
-	}
+    func (c *ctxReader) Read(p []byte) (int, error) {
+    if err := c.ctx.Err(); err != nil {
+    return 0, err
+    }
+    return c.r.Read(p)
+    }
 
     Limitation: cancellation is only observed between Read calls; a blocked
     underlying reader (e.g. a stalled network connection) must itself be
     context-aware or closed to unblock io.Copy.
+
   - One pass, digest and MAC from the same bytes: HMacComparer.Hasher composes with
     io.MultiWriter (or io.TeeReader); each call derives a fresh incremental object:
 
-	comparer, err := hmac.New("HMACSHA256", key)
-	if err != nil {
-		log.Fatal(err)
-	}
-	mac := comparer.Hasher()
-	digest := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(digest, mac), r); err != nil {
-		log.Fatal(err)
-	}
-	sum, macSum := digest.Sum(nil), mac.Sum(nil)
+    comparer, err := hmac.New("HMACSHA256", key)
+    if err != nil {
+    log.Fatal(err)
+    }
+    mac := comparer.Hasher()
+    digest := sha256.New()
+    if _, err := io.Copy(io.MultiWriter(digest, mac), r); err != nil {
+    log.Fatal(err)
+    }
+    sum, macSum := digest.Sum(nil), mac.Sum(nil)
 
     Key lifecycle: New copies the key into the descriptor, and the standard
     library hmac.New derives the key into its ipad/opad state at construction
@@ -141,11 +146,13 @@ Concurrency:
     security-equivalent to the key and must be protected accordingly; they are
     not safe for concurrent use—give every goroutine its own via a separate
     Hasher() call.
+
   - Keys and goroutines: sharing one key []byte for read-only HMAC calls across
     goroutines is safe. But Zero()/erasure must happen only after all goroutines
     are done, or each goroutine must hold its own copy (append([]byte(nil), key...)).
     In particular, never share a single HMacComparer instance between a goroutine
     calling Zero and others calling Digest/Compare/From/CompareFrom/Hasher.
+
   - FAQ: a single HMAC cannot be parallelized by splitting the message into
     blocks — the underlying hash is a chained compression function and the MAC
     depends on the complete message. Parallelism lives at the call level

@@ -4,10 +4,10 @@ import (
 	"bytes"
 
 	crypto "github.com/charlienet/go-crypto"
+	_ "github.com/charlienet/go-crypto/engines" // 一键导入所有引擎
 	"github.com/charlienet/go-crypto/hash"
 	"github.com/charlienet/go-crypto/hmac"
 	"github.com/charlienet/go-crypto/kdf"
-	_ "github.com/charlienet/go-crypto/engines" // 一键导入所有引擎
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"testing"
@@ -15,12 +15,12 @@ import (
 
 func TestSymmetricEncryptionIntegration(t *testing.T) {
 	testCases := []struct {
-		name        string
-		algorithm   crypto.Algorithm
-		mode        crypto.Mode
-		keySize     int
-		plaintext   string
-		insecure    bool
+		name      string
+		algorithm crypto.Algorithm
+		mode      crypto.Mode
+		keySize   int
+		plaintext string
+		insecure  bool
 	}{
 		{"AES128-CBC", crypto.AES128, crypto.CBC, 16, "Hello World!", false},
 		{"AES192-CBC", crypto.AES192, crypto.CBC, 24, "Hello World!", false},
@@ -190,14 +190,14 @@ func TestHashIntegration(t *testing.T) {
 			// Get hash function
 			hashFunc, err := hash.ByName(tc.algorithm)
 			require.NoError(t, err)
-			
+
 			// Test hash function
 			digest1 := hashFunc([]byte(tc.message))
 
 			// Test New hasher
 			hasher, err := hash.New(tc.algorithm)
 			require.NoError(t, err)
-			
+
 			digest2 := hasher.Digest([]byte(tc.message))
 
 			assert.Equal(t, digest1.Bytes(), digest2.Bytes(), "Direct hash and New hasher should produce same result")
@@ -235,14 +235,14 @@ func TestHMACIntegration(t *testing.T) {
 			// Get HMAC function
 			hmacFunc, err := hmac.ByName(tc.algorithm)
 			require.NoError(t, err)
-			
+
 			// Test HMAC function
 			mac1 := hmacFunc([]byte(tc.key), []byte(tc.message))
 
 			// Test New MAC
 			macObj, err := hmac.New(tc.algorithm, []byte(tc.key))
 			require.NoError(t, err)
-			
+
 			mac2, err := macObj.Digest([]byte(tc.message))
 			require.NoError(t, err)
 
@@ -285,14 +285,14 @@ func TestEndToEndKDFToSymmetric(t *testing.T) {
 
 	// Use derived key for symmetric encryption
 	plaintext := "Hello from KDF-to-symmetric integration test!"
-	
+
 	// Add IV for CBC mode
 	iv := make([]byte, crypto.AES256.BlockSize())
 	for i := range iv {
 		iv[i] = byte(i % 256)
 	}
 
-	encrypted, err := crypto.Encrypt(crypto.AES256, crypto.CBC, []byte(plaintext), 
+	encrypted, err := crypto.Encrypt(crypto.AES256, crypto.CBC, []byte(plaintext),
 		crypto.WithKey(derivedKey),
 		crypto.WithIV(iv),
 	)
